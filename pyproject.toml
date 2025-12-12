@@ -54,6 +54,7 @@ dependencies = [
     # Utilities
     "httpx>=0.26.0",
     "python-dotenv>=1.0.0",
+    "slowapi>=0.1.9",  # Rate limiting
 ]
 
 [project.optional-dependencies]

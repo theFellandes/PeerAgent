@@ -1,7 +1,9 @@
 # Agent API Routes
 from typing import Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 import uuid
 import json
 from datetime import datetime
@@ -21,6 +23,9 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/agent", tags=["Agent"])
 
+# Rate limiter (shared with main app)
+limiter = Limiter(key_func=get_remote_address)
+
 # In-memory task storage (replace with Redis in production)
 task_store: dict = {}
 
@@ -35,6 +40,7 @@ def get_peer_agent() -> PeerAgent:
     response_model=TaskResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Bad Request"},
+        429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"},
         500: {"model": ErrorResponse, "description": "Internal Server Error"}
     },
     summary="Execute Agent Task",
@@ -46,14 +52,18 @@ The task will be analyzed by the PeerAgent which will:
 2. Route to the appropriate sub-agent
 3. Return results or follow-up questions
 
+**Rate Limit:** 10 requests per minute
+
 **Examples:**
 - Code: "Write a Python function to read a file"
 - Content: "What is machine learning?"
 - Business: "Our sales are dropping by 20%, help me understand why"
     """
 )
+@limiter.limit("10/minute")
 async def execute_task(
-    request: TaskExecuteRequest,
+    request: Request,
+    body: TaskExecuteRequest,
     background_tasks: BackgroundTasks,
     peer_agent: PeerAgent = Depends(get_peer_agent)
 ) -> TaskResponse:
@@ -64,7 +74,7 @@ async def execute_task(
     For async processing (with queue), a task_id is returned for status polling.
     """
     # Validate input
-    if not request.task or not request.task.strip():
+    if not body.task or not body.task.strip():
         raise HTTPException(
             status_code=400,
             detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
@@ -72,9 +82,9 @@ async def execute_task(
     
     # Generate task ID
     task_id = f"task-{uuid.uuid4().hex[:12]}"
-    session_id = request.session_id or f"session-{uuid.uuid4().hex[:8]}"
+    session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
     
-    logger.info(f"Received task {task_id}: {request.task[:100]}...")
+    logger.info(f"Received task {task_id}: {body.task[:100]}...")
     
     # For synchronous mode: execute immediately
     # (Queue mode would push to Celery instead)
@@ -83,7 +93,7 @@ async def execute_task(
         task_store[task_id] = {
             "task_id": task_id,
             "status": TaskStatus.PROCESSING,
-            "task": request.task,
+            "task": body.task,
             "session_id": session_id,
             "created_at": datetime.utcnow().isoformat(),
             "result": None,
@@ -92,7 +102,7 @@ async def execute_task(
         
         # Execute the task
         result = await peer_agent.execute(
-            task=request.task,
+            task=body.task,
             session_id=session_id,
             task_id=task_id
         )
@@ -134,12 +144,14 @@ async def execute_task(
     "/status/{task_id}",
     response_model=TaskStatusResponse,
     responses={
-        404: {"model": ErrorResponse, "description": "Task Not Found"}
+        404: {"model": ErrorResponse, "description": "Task Not Found"},
+        429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"}
     },
     summary="Get Task Status",
-    description="Retrieve the status and result of a previously submitted task."
+    description="Retrieve the status and result of a previously submitted task. **Rate Limit:** 30 requests per minute"
 )
-async def get_task_status(task_id: str) -> TaskStatusResponse:
+@limiter.limit("30/minute")
+async def get_task_status(request: Request, task_id: str) -> TaskStatusResponse:
     """
     Get the status of a task by ID.
     
@@ -167,9 +179,14 @@ async def get_task_status(task_id: str) -> TaskStatusResponse:
 @router.post(
     "/execute/direct/{agent_type}",
     response_model=TaskResponse,
+    responses={
+        429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"}
+    },
     summary="Execute with Specific Agent",
     description="""
 Execute a task directly with a specified agent type, bypassing automatic classification.
+
+**Rate Limit:** 10 requests per minute
 
 **Agent Types:**
 - `code`: Code generation tasks
@@ -177,9 +194,11 @@ Execute a task directly with a specified agent type, bypassing automatic classif
 - `business`: Business problem diagnosis
     """
 )
+@limiter.limit("10/minute")
 async def execute_direct(
+    request: Request,
     agent_type: str,
-    request: TaskExecuteRequest,
+    body: TaskExecuteRequest,
     peer_agent: PeerAgent = Depends(get_peer_agent)
 ) -> TaskResponse:
     """Execute a task with a specific agent type."""
@@ -194,13 +213,13 @@ async def execute_direct(
         )
     
     task_id = f"task-{uuid.uuid4().hex[:12]}"
-    session_id = request.session_id or f"session-{uuid.uuid4().hex[:8]}"
+    session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
     
     try:
         task_store[task_id] = {
             "task_id": task_id,
             "status": TaskStatus.PROCESSING,
-            "task": request.task,
+            "task": body.task,
             "session_id": session_id,
             "created_at": datetime.utcnow().isoformat(),
             "result": None,
@@ -208,7 +227,7 @@ async def execute_direct(
         }
         
         result = await peer_agent.execute_with_agent_type(
-            task=request.task,
+            task=body.task,
             agent_type=agent_type,
             session_id=session_id,
             task_id=task_id

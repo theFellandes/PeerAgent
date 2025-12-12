@@ -1,7 +1,11 @@
 # FastAPI Application - Main Entry Point
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import logging
 
 from src.config import get_settings
@@ -15,6 +19,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Rate limiter instance
+limiter = Limiter(key_func=get_remote_address)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,6 +30,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"LLM Provider: {settings.llm_provider}, Model: {settings.llm_model}")
+    logger.info("Rate limiting enabled: 10 requests/minute for agent endpoints")
     yield
     # Shutdown
     logger.info("Shutting down application...")
@@ -50,6 +58,7 @@ A sophisticated multi-agent system built with LangGraph for intelligent task rou
 - **Content Research**: Web search with source citations
 - **Business Analysis**: Socratic questioning for problem diagnosis
 - **Problem Structuring**: Create structured problem trees
+- **Rate Limiting**: 10 requests/minute per IP for agent endpoints
 
 ## Agents
 
@@ -65,6 +74,12 @@ A sophisticated multi-agent system built with LangGraph for intelligent task rou
         openapi_url="/openapi.json"
     )
     
+    # Add rate limiter to app state
+    app.state.limiter = limiter
+    
+    # Add rate limit exceeded handler
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
@@ -77,7 +92,7 @@ A sophisticated multi-agent system built with LangGraph for intelligent task rou
     # Include routers
     app.include_router(agent_router, prefix=settings.api_prefix)
     
-    # Health check endpoint
+    # Health check endpoint (no rate limit)
     @app.get("/health", tags=["Health"])
     async def health_check():
         """Health check endpoint."""
@@ -87,7 +102,7 @@ A sophisticated multi-agent system built with LangGraph for intelligent task rou
             "version": settings.app_version
         }
     
-    # Root endpoint
+    # Root endpoint (no rate limit)
     @app.get("/", tags=["Root"])
     async def root():
         """Root endpoint with API information."""
@@ -95,7 +110,8 @@ A sophisticated multi-agent system built with LangGraph for intelligent task rou
             "message": f"Welcome to {settings.app_name}",
             "version": settings.app_version,
             "docs": "/docs",
-            "health": "/health"
+            "health": "/health",
+            "rate_limit": "10 requests/minute for /v1/agent/* endpoints"
         }
     
     return app

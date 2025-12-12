@@ -28,6 +28,7 @@ ddgs>=6.0.0
 # Utilities
 httpx>=0.26.0
 python-dotenv>=1.0.0
+slowapi>=0.1.9  # Rate limiting
 
 # Testing
 pytest>=7.4.0

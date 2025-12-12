@@ -1,10 +1,16 @@
 # Docker Compose for PeerAgent Multi-Agent System
+# Usage: docker-compose up -d
+# Build with tags: docker-compose build --build-arg VERSION=1.0.0
+
 services:
   # FastAPI Application
   api:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-1.0.0}
+    image: peeragent-api:${VERSION:-latest}
     container_name: peeragent-api
     ports:
       - "8000:8000"
@@ -15,7 +21,9 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_MODEL=${LLM_MODEL:-gpt-4}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
       - DEBUG=${DEBUG:-false}
     depends_on:
       - mongo

@@ -1,10 +1,19 @@
 # Production Dockerfile for FastAPI Application
 FROM python:3.11-slim
 
+# Build arguments
+ARG VERSION=1.0.0
+
+# Labels for image metadata
+LABEL org.opencontainers.image.title="PeerAgent API"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.description="Multi-Agent AI System with LangGraph"
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    APP_VERSION=${VERSION}
 
 # Set work directory
 WORKDIR /app
