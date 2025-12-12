@@ -3,12 +3,12 @@ import streamlit as st
 import requests
 import random
 import os
-from typing import Optional, List
+from typing import Optional
 
 # Configuration
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-# Expanded example pool
+# Expanded example pool - 10 per category
 EXAMPLE_POOL = {
     "code": [
         "Write a Python function to read a CSV file and calculate the average of a column",
@@ -48,6 +48,31 @@ EXAMPLE_POOL = {
     ]
 }
 
+# Fallback examples when pool exhausted
+FALLBACK_EXAMPLES = {
+    "code": [
+        "Write a function to parse and validate JSON data",
+        "Create a simple HTTP server in Python",
+        "Implement a queue data structure from scratch",
+        "Write unit tests for a calculator class",
+        "Create a CLI tool using argparse",
+    ],
+    "content": [
+        "What are emerging technology trends for next year?",
+        "Explain the concept of cloud-native applications",
+        "What are the principles of good UI/UX design?",
+        "How do recommendation systems work?",
+        "What is the future of remote work?",
+    ],
+    "business": [
+        "Analyze common startup growth challenges",
+        "What causes customer churn in SaaS businesses?",
+        "How to improve team productivity and morale?",
+        "Strategies for entering new markets",
+        "How to reduce operational costs effectively?",
+    ]
+}
+
 # Page configuration
 st.set_page_config(
     page_title="PeerAgent - AI Assistant",
@@ -73,9 +98,6 @@ st.markdown("""
     .stButton button:hover {
         transform: scale(1.05);
     }
-    .example-btn {
-        margin: 0.25rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,55 +113,40 @@ def init_session_state():
         st.session_state.used_examples = {"code": [], "content": [], "business": []}
     if "example_count" not in st.session_state:
         st.session_state.example_count = 0
+    if "using_fallback" not in st.session_state:
+        st.session_state.using_fallback = {"code": False, "content": False, "business": False}
 
 
 def get_random_example(category: str) -> Optional[str]:
-    """Get a random unused example from the pool."""
-    available = [ex for ex in EXAMPLE_POOL[category] 
-                 if ex not in st.session_state.used_examples[category]]
+    """Get a random unused example from the pool or fallback."""
+    # First try main pool
+    if not st.session_state.using_fallback[category]:
+        available = [ex for ex in EXAMPLE_POOL[category] 
+                     if ex not in st.session_state.used_examples[category]]
+        
+        if available:
+            example = random.choice(available)
+            st.session_state.used_examples[category].append(example)
+            st.session_state.example_count += 1
+            return example
+        else:
+            # Switch to fallback pool
+            st.session_state.using_fallback[category] = True
     
-    if available:
-        example = random.choice(available)
+    # Use fallback pool
+    fallback_available = [ex for ex in FALLBACK_EXAMPLES[category] 
+                          if ex not in st.session_state.used_examples[category]]
+    
+    if fallback_available:
+        example = random.choice(fallback_available)
         st.session_state.used_examples[category].append(example)
         st.session_state.example_count += 1
         return example
-    return None
-
-
-async def generate_llm_example(category: str) -> str:
-    """Generate a new example using LLM when pool is exhausted."""
-    prompts = {
-        "code": "Generate a unique programming task for a developer. Just the task, no code.",
-        "content": "Generate a unique research question about technology or science. Just the question.",
-        "business": "Generate a unique business problem scenario for analysis. Just the scenario."
-    }
     
-    try:
-        response = requests.post(
-            f"{API_URL}/v1/agent/execute/direct/content",
-            json={"task": prompts[category]},
-            timeout=30
-        )
-        if response.ok:
-            result = response.json()
-            task_id = result.get("task_id")
-            if task_id:
-                status = requests.get(f"{API_URL}/v1/agent/status/{task_id}", timeout=10)
-                if status.ok:
-                    data = status.json()
-                    content = data.get("result", {}).get("data", {}).get("content", "")
-                    if content:
-                        return content[:200]  # Limit length
-    except Exception:
-        pass
-    
-    # Fallback generic examples
-    fallbacks = {
-        "code": "Write a function to process and analyze log files",
-        "content": "What are emerging technology trends?",
-        "business": "Analyze a startup's growth challenges"
-    }
-    return fallbacks[category]
+    # All exhausted - reset and start over
+    st.session_state.used_examples[category] = []
+    st.session_state.using_fallback[category] = False
+    return random.choice(EXAMPLE_POOL[category])
 
 
 def send_task(task: str, agent_type: Optional[str] = None) -> dict:
@@ -153,14 +160,17 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
         response = requests.post(
             endpoint,
             json={"task": task, "session_id": st.session_state.session_id},
-            timeout=60
+            timeout=120  # Increased timeout
         )
         response.raise_for_status()
         result = response.json()
         
         task_id = result.get("task_id")
         if task_id:
-            status_response = requests.get(f"{API_URL}/v1/agent/status/{task_id}", timeout=30)
+            status_response = requests.get(
+                f"{API_URL}/v1/agent/status/{task_id}", 
+                timeout=30
+            )
             status_response.raise_for_status()
             return status_response.json()
         
@@ -168,7 +178,7 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
     except requests.exceptions.ConnectionError:
         return {"error": "Could not connect to API. Make sure the server is running."}
     except requests.exceptions.Timeout:
-        return {"error": "Request timed out."}
+        return {"error": "Request timed out. Try a simpler query."}
     except Exception as e:
         return {"error": str(e)}
 
@@ -289,49 +299,41 @@ def main():
             st.session_state.session_id = f"session-{uuid.uuid4().hex[:8]}"
             st.session_state.messages = []
             st.session_state.used_examples = {"code": [], "content": [], "business": []}
+            st.session_state.using_fallback = {"code": False, "content": False, "business": False}
             st.session_state.example_count = 0
             st.rerun()
         
         st.markdown("---")
         st.markdown("### Try Random Examples")
-        st.caption("Click to get a random example from each category")
+        st.caption("Click to get a random example")
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("💻", key="ex_code", help="Random code example"):
+            code_remaining = len(EXAMPLE_POOL["code"]) + len(FALLBACK_EXAMPLES["code"]) - len(st.session_state.used_examples["code"])
+            if st.button(f"💻 ({code_remaining})", key="ex_code", help="Random code example"):
                 example = get_random_example("code")
                 if example:
-                    st.session_state.example_task = example
-                    st.session_state.example_type = "code"
-                else:
-                    st.warning("Pool exhausted! Generating new...")
-                    st.session_state.generate_example = "code"
+                    st.session_state.pending_example = {"task": example, "type": "code"}
         
         with col2:
-            if st.button("📚", key="ex_content", help="Random content example"):
+            content_remaining = len(EXAMPLE_POOL["content"]) + len(FALLBACK_EXAMPLES["content"]) - len(st.session_state.used_examples["content"])
+            if st.button(f"📚 ({content_remaining})", key="ex_content", help="Random content example"):
                 example = get_random_example("content")
                 if example:
-                    st.session_state.example_task = example
-                    st.session_state.example_type = "content"
-                else:
-                    st.warning("Pool exhausted!")
-                    st.session_state.generate_example = "content"
+                    st.session_state.pending_example = {"task": example, "type": "content"}
         
         with col3:
-            if st.button("📈", key="ex_business", help="Random business example"):
+            business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(st.session_state.used_examples["business"])
+            if st.button(f"📈 ({business_remaining})", key="ex_business", help="Random business example"):
                 example = get_random_example("business")
                 if example:
-                    st.session_state.example_task = example
-                    st.session_state.example_type = "business"
-                else:
-                    st.warning("Pool exhausted!")
-                    st.session_state.generate_example = "business"
+                    st.session_state.pending_example = {"task": example, "type": "business"}
         
-        # Show remaining examples
-        remaining = {k: len(EXAMPLE_POOL[k]) - len(st.session_state.used_examples[k]) 
-                    for k in EXAMPLE_POOL}
-        st.caption(f"Remaining: 💻{remaining['code']} 📚{remaining['content']} 📈{remaining['business']}")
+        # Fallback indicator
+        using_any_fallback = any(st.session_state.using_fallback.values())
+        if using_any_fallback:
+            st.caption("🔄 Using extended pool")
     
     # Main content
     st.title("💬 PeerAgent Chat")
@@ -345,17 +347,20 @@ def main():
             else:
                 render_response(message["content"])
     
-    # Handle example task
-    if "example_task" in st.session_state:
-        task = st.session_state.example_task
-        del st.session_state.example_task
-        example_type = st.session_state.pop("example_type", None)
+    # Handle pending example (from button click)
+    if "pending_example" in st.session_state:
+        pending = st.session_state.pending_example
+        del st.session_state.pending_example
+        
+        task = pending["task"]
+        example_type = pending["type"]
         
         st.session_state.messages.append({"role": "user", "content": task})
         
-        with st.spinner("🔄 Processing..."):
-            agent_type = example_type if agent_mode == "Automatic" else agent_mode.lower()
-            result = send_task(task, agent_type)
+        # Process immediately
+        with st.spinner(f"🔄 Processing with {example_type} agent..."):
+            agent_type_to_use = example_type if agent_mode == "Automatic" else agent_mode.lower()
+            result = send_task(task, agent_type_to_use)
         
         st.session_state.messages.append({"role": "assistant", "content": result})
         st.rerun()
