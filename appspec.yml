@@ -1,0 +1,23 @@
+# AWS CodeDeploy Application Specification
+version: 0.0
+os: linux
+
+files:
+  - source: /
+    destination: /opt/peeragent
+
+hooks:
+  BeforeInstall:
+    - location: scripts/before_install.sh
+      timeout: 300
+      runas: root
+
+  ApplicationStart:
+    - location: scripts/start_application.sh
+      timeout: 300
+      runas: root
+
+  ApplicationStop:
+    - location: scripts/stop_application.sh
+      timeout: 120
+      runas: root

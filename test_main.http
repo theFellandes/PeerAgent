@@ -1,0 +1,455 @@
+# PeerAgent API Comprehensive Tests
+# Use with VS Code REST Client, IntelliJ HTTP Client, or similar
+# Variables: @baseUrl, @session
+
+@baseUrl = http://127.0.0.1:8000
+@session = test-session-{{$timestamp}}
+
+###############################################################################
+# HEALTH & ROOT ENDPOINTS
+###############################################################################
+
+### Health Check
+# @name healthCheck
+GET {{baseUrl}}/health
+Accept: application/json
+
+###
+
+### Root Endpoint
+GET {{baseUrl}}/
+Accept: application/json
+
+###
+
+### OpenAPI Schema
+GET {{baseUrl}}/openapi.json
+Accept: application/json
+
+###
+
+###############################################################################
+# TASK EXECUTION - AUTOMATIC ROUTING
+###############################################################################
+
+### Execute Code Task (Auto-Route)
+# @name codeTask
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "Write a Python function to read a CSV file and return the data as a list of dictionaries",
+    "session_id": "{{session}}"
+}
+
+###
+
+### Get Code Task Status
+@codeTaskId = {{codeTask.response.body.task_id}}
+GET {{baseUrl}}/v1/agent/status/{{codeTaskId}}
+Accept: application/json
+
+###
+
+### Execute Content Task (Auto-Route)
+# @name contentTask
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "What are the latest trends in artificial intelligence and machine learning?",
+    "session_id": "{{session}}"
+}
+
+###
+
+### Get Content Task Status
+@contentTaskId = {{contentTask.response.body.task_id}}
+GET {{baseUrl}}/v1/agent/status/{{contentTaskId}}
+Accept: application/json
+
+###
+
+### Execute Business Task (Auto-Route)
+# @name businessTask
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "Our customer acquisition cost has increased by 40% this year and I don't understand why. Can you help me diagnose the problem?",
+    "session_id": "{{session}}"
+}
+
+###
+
+### Get Business Task Status
+@businessTaskId = {{businessTask.response.body.task_id}}
+GET {{baseUrl}}/v1/agent/status/{{businessTaskId}}
+Accept: application/json
+
+###
+
+###############################################################################
+# DIRECT AGENT EXECUTION
+###############################################################################
+
+### Direct Code Agent - Simple Function
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Create a Python class for managing a todo list with add, remove, and list methods",
+    "session_id": "direct-code-{{$timestamp}}"
+}
+
+###
+
+### Direct Code Agent - Algorithm
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Implement a binary search algorithm in Python with type hints",
+    "session_id": "direct-code-{{$timestamp}}"
+}
+
+###
+
+### Direct Code Agent - Web Scraper
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Write a Python script to scrape product prices from an e-commerce website using BeautifulSoup",
+    "session_id": "direct-code-{{$timestamp}}"
+}
+
+###
+
+### Direct Code Agent - API Client
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Create a REST API client class with retry logic and error handling",
+    "session_id": "direct-code-{{$timestamp}}"
+}
+
+###
+
+### Direct Content Agent - Tech Topic
+POST {{baseUrl}}/v1/agent/execute/direct/content
+Content-Type: application/json
+
+{
+    "task": "Explain the differences between SQL and NoSQL databases with pros and cons",
+    "session_id": "direct-content-{{$timestamp}}"
+}
+
+###
+
+### Direct Content Agent - Research
+POST {{baseUrl}}/v1/agent/execute/direct/content
+Content-Type: application/json
+
+{
+    "task": "What is quantum computing and what are its potential applications?",
+    "session_id": "direct-content-{{$timestamp}}"
+}
+
+###
+
+### Direct Content Agent - Comparison
+POST {{baseUrl}}/v1/agent/execute/direct/content
+Content-Type: application/json
+
+{
+    "task": "Compare microservices vs monolithic architecture - when to use each?",
+    "session_id": "direct-content-{{$timestamp}}"
+}
+
+###
+
+### Direct Business Agent - Sales Problem
+POST {{baseUrl}}/v1/agent/execute/direct/business
+Content-Type: application/json
+
+{
+    "task": "Our sales team is underperforming and we're not meeting quarterly targets",
+    "session_id": "direct-business-{{$timestamp}}"
+}
+
+###
+
+### Direct Business Agent - Churn Problem
+POST {{baseUrl}}/v1/agent/execute/direct/business
+Content-Type: application/json
+
+{
+    "task": "Customer churn rate doubled in the last 6 months, help diagnose",
+    "session_id": "direct-business-{{$timestamp}}"
+}
+
+###
+
+### Direct Business Agent - Operational
+POST {{baseUrl}}/v1/agent/execute/direct/business
+Content-Type: application/json
+
+{
+    "task": "Our warehouse operations have become 30% slower after the new system rollout",
+    "session_id": "direct-business-{{$timestamp}}"
+}
+
+###
+
+###############################################################################
+# CLASSIFICATION DEBUG
+###############################################################################
+
+### Classify Code Task
+GET {{baseUrl}}/v1/agent/classify?task=Write%20a%20Python%20script%20to%20parse%20JSON
+Accept: application/json
+
+###
+
+### Classify Content Task
+GET {{baseUrl}}/v1/agent/classify?task=What%20is%20machine%20learning
+Accept: application/json
+
+###
+
+### Classify Business Task
+GET {{baseUrl}}/v1/agent/classify?task=Our%20revenue%20is%20declining%20by%2020%20percent
+Accept: application/json
+
+###
+
+### Classify Ambiguous Task
+GET {{baseUrl}}/v1/agent/classify?task=Help%20me%20with%20my%20project
+Accept: application/json
+
+###
+
+###############################################################################
+# BUSINESS CONVERSATION FLOW
+###############################################################################
+
+### Start Business Analysis
+# @name businessStart
+POST {{baseUrl}}/v1/agent/execute/direct/business
+Content-Type: application/json
+
+{
+    "task": "Our product launch failed to meet targets and we lost market share",
+    "session_id": "business-flow-{{$timestamp}}"
+}
+
+###
+
+### Continue Business Analysis with Answers
+POST {{baseUrl}}/v1/agent/business/continue
+Content-Type: application/json
+
+{
+    "session_id": "business-flow-test",
+    "answers": {
+        "When did it start?": "About 3 months ago after the launch",
+        "What's the impact?": "Revenue down 25%, lost 2 major enterprise clients",
+        "Is it a TOP 3 priority?": "Yes, it's the number 1 priority right now"
+    }
+}
+
+###
+
+###############################################################################
+# ERROR HANDLING TESTS
+###############################################################################
+
+### Error - Empty Task
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": ""
+}
+
+> {%
+    client.test("Returns 400 for empty task", function() {
+        client.assert(response.status === 400, "Expected 400 status");
+    });
+%}
+
+###
+
+### Error - Whitespace Only Task
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "   "
+}
+
+> {%
+    client.test("Returns 400 for whitespace task", function() {
+        client.assert(response.status === 400, "Expected 400 status");
+    });
+%}
+
+###
+
+### Error - Invalid Agent Type
+POST {{baseUrl}}/v1/agent/execute/direct/invalid_agent
+Content-Type: application/json
+
+{
+    "task": "Test task"
+}
+
+> {%
+    client.test("Returns 400 for invalid agent", function() {
+        client.assert(response.status === 400, "Expected 400 status");
+    });
+%}
+
+###
+
+### Error - Task Not Found
+GET {{baseUrl}}/v1/agent/status/nonexistent-task-id
+Accept: application/json
+
+> {%
+    client.test("Returns 404 for unknown task", function() {
+        client.assert(response.status === 404, "Expected 404 status");
+    });
+%}
+
+###
+
+### Error - Empty Classify
+GET {{baseUrl}}/v1/agent/classify?task=
+Accept: application/json
+
+> {%
+    client.test("Returns 400 for empty classify", function() {
+        client.assert(response.status === 400, "Expected 400 status");
+    });
+%}
+
+###
+
+###############################################################################
+# EDGE CASES
+###############################################################################
+
+### Very Long Task
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "Write a comprehensive Python application that includes: 1) A class for user authentication with password hashing, 2) A class for session management with JWT tokens, 3) A class for role-based access control, 4) Database integration with SQLAlchemy, 5) RESTful API endpoints using FastAPI, 6) Input validation with Pydantic, 7) Comprehensive error handling, 8) Logging with structured output, 9) Unit tests with pytest, 10) Docker configuration for deployment. Make sure to include type hints, docstrings, and follow PEP 8 guidelines.",
+    "session_id": "edge-long-{{$timestamp}}"
+}
+
+###
+
+### Unicode/Special Characters
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "Write code to handle émojis 🚀 and spëcial çharacters like © ® ™",
+    "session_id": "edge-unicode-{{$timestamp}}"
+}
+
+###
+
+### Multiple Languages
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Write the same sorting function in Python, JavaScript, and Go",
+    "session_id": "edge-multilang-{{$timestamp}}"
+}
+
+###
+
+### Technical Jargon Heavy
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "Implement a CQRS pattern with event sourcing using async/await, including idempotency handling and saga orchestration for distributed transactions",
+    "session_id": "edge-jargon-{{$timestamp}}"
+}
+
+###
+
+###############################################################################
+# PERFORMANCE TESTS
+###############################################################################
+
+### Quick Code Task
+# Should complete in < 10 seconds
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Write hello world in Python",
+    "session_id": "perf-quick-{{$timestamp}}"
+}
+
+###
+
+### Sequential Requests (run multiple times)
+POST {{baseUrl}}/v1/agent/execute
+Content-Type: application/json
+
+{
+    "task": "What is 2+2?",
+    "session_id": "perf-seq-{{$timestamp}}"
+}
+
+###
+
+###############################################################################
+# BATCH TESTING SCENARIOS
+###############################################################################
+
+### Scenario: Full Code Generation Workflow
+# 1. Submit task
+# @name batchCode
+POST {{baseUrl}}/v1/agent/execute/direct/code
+Content-Type: application/json
+
+{
+    "task": "Create a rate limiter class using token bucket algorithm",
+    "session_id": "batch-code-{{$timestamp}}"
+}
+
+###
+
+### Scenario: Full Content Research Workflow
+# @name batchContent
+POST {{baseUrl}}/v1/agent/execute/direct/content
+Content-Type: application/json
+
+{
+    "task": "What are the best practices for securing REST APIs?",
+    "session_id": "batch-content-{{$timestamp}}"
+}
+
+###
+
+### Scenario: Full Business Analysis Workflow
+# @name batchBusiness
+POST {{baseUrl}}/v1/agent/execute/direct/business
+Content-Type: application/json
+
+{
+    "task": "Our conversion rate dropped 40% after the website redesign",
+    "session_id": "batch-business-{{$timestamp}}"
+}
+
+###
