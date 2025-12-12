@@ -8,68 +8,94 @@ from typing import Optional
 # Configuration
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-# Expanded example pool - 10 per category
+# Welcome message (not sent to LLM, just displayed in UI)
+WELCOME_MESSAGE = """
+## 👋 Welcome to PeerAgent!
+
+I'm your intelligent multi-agent assistant. I can help you with:
+
+| Agent | What I Can Do |
+|-------|--------------|
+| 💻 **Code** | Write code in Python, Java, SQL, JavaScript, and more |
+| 📚 **Research** | Find and summarize information on any topic |
+| 📈 **Business** | Diagnose business problems using Socratic questioning |
+
+### How to use:
+1. **Type your question** in the chat box below
+2. I'll automatically route to the best agent
+3. Or use the sidebar buttons for specific examples
+
+### Tips:
+- Be specific about what you need
+- For code, mention the programming language
+- For business problems, describe the situation in detail
+
+---
+*Start by typing a question or click an example button!*
+"""
+
+# Example pool aligned with PDF guidelines - focused on technical test scenarios
 EXAMPLE_POOL = {
     "code": [
-        "Write a Python function to read a CSV file and calculate the average of a column",
-        "Create a Python class for a binary search tree with insert and search methods",
-        "Write a function to validate email addresses using regex",
-        "Create a REST API endpoint using FastAPI for user registration",
-        "Write a Python script to scrape headlines from a news website",
-        "Implement a rate limiter class using the token bucket algorithm",
-        "Create a decorator that caches function results with TTL",
-        "Write a function to merge two sorted arrays efficiently",
-        "Create a context manager for database transactions",
-        "Write a Python generator for Fibonacci sequence",
+        # Multi-language support examples
+        "Write a SQL query that returns all customers who made purchases last month",
+        "Create a Java class to implement a REST API client with error handling",
+        "Write a JavaScript function to validate form inputs",
+        "Generate a Python script that reads a CSV and calculates averages",
+        "Create a TypeScript interface for a User object with validation",
+        # Algorithm/Design examples
+        "Implement a rate limiter using the token bucket algorithm in Python",
+        "Write a function to find the shortest path in a graph using BFS",
+        "Create a decorator pattern implementation in Python",
+        "Write SQL to find the top 10 products by sales with joins",
+        "Implement a simple state machine in JavaScript",
     ],
     "content": [
-        "What are the latest trends in artificial intelligence?",
-        "Explain the differences between SQL and NoSQL databases",
-        "What is quantum computing and how does it work?",
-        "Summarize the key principles of clean code architecture",
-        "What are the best practices for API security?",
-        "Explain microservices architecture vs monolithic",
-        "What are the latest developments in renewable energy?",
-        "How does blockchain technology work?",
-        "What is DevOps and its key practices?",
-        "Explain the concept of edge computing",
+        # Technology research examples
+        "What are the key differences between REST and GraphQL APIs?",
+        "Explain the SOLID principles in software development",
+        "What are the best practices for securing a REST API?",
+        "Compare SQL and NoSQL databases - when to use each?",
+        "What is the CAP theorem and its implications?",
+        # Industry trends
+        "What are the latest trends in AI and machine learning?",
+        "Explain microservices architecture and its benefits",
+        "What is event-driven architecture?",
+        "How does containerization with Docker work?",
+        "What are the principles of clean code?",
     ],
     "business": [
-        "Our customer acquisition cost has increased by 40% this year, help me understand why",
-        "Our employee turnover rate doubled in the last quarter, diagnose the problem",
-        "Sales team is underperforming despite increased marketing spend",
-        "Our product launch failed to meet targets, analyze what went wrong",
-        "Customer satisfaction scores are declining, help identify root causes",
-        "Our supply chain costs are increasing faster than revenue",
-        "We're losing market share to competitors, analyze the situation",
-        "Our conversion rate dropped after website redesign",
-        "Help me understand why our subscription renewal rate is falling",
-        "Our operational efficiency has decreased, diagnose the issues",
+        # Business diagnosis scenarios (Socratic method)
+        "Our customer acquisition cost increased 40% this year, help diagnose why",
+        "Sales team is underperforming despite increased marketing budget",
+        "Customer churn doubled in Q4, what could be the root causes?",
+        "Our product launch failed to meet targets by 30%",
+        "Employee turnover increased significantly after the merger",
+        # Operational problems
+        "Warehouse operations slowed 25% after new system implementation",
+        "Our SaaS conversion rate dropped after website redesign",
+        "Supply chain costs are growing faster than revenue",
+        "Customer satisfaction scores are declining despite new features",
+        "Our startup is struggling to achieve product-market fit",
     ]
 }
 
-# Fallback examples when pool exhausted
+# Fallback examples
 FALLBACK_EXAMPLES = {
     "code": [
-        "Write a function to parse and validate JSON data",
-        "Create a simple HTTP server in Python",
-        "Implement a queue data structure from scratch",
-        "Write unit tests for a calculator class",
-        "Create a CLI tool using argparse",
+        "Write a function to parse JSON data and handle errors",
+        "Create a simple HTTP server with routing",
+        "Implement a binary search tree in any language",
     ],
     "content": [
-        "What are emerging technology trends for next year?",
-        "Explain the concept of cloud-native applications",
-        "What are the principles of good UI/UX design?",
-        "How do recommendation systems work?",
-        "What is the future of remote work?",
+        "Explain the concept of technical debt",
+        "What are design patterns in software engineering?",
+        "How do message queues work?",
     ],
     "business": [
-        "Analyze common startup growth challenges",
-        "What causes customer churn in SaaS businesses?",
-        "How to improve team productivity and morale?",
-        "Strategies for entering new markets",
-        "How to reduce operational costs effectively?",
+        "Analyze factors that lead to startup failure",
+        "What causes low employee engagement?",
+        "How to identify market opportunities?",
     ]
 }
 
@@ -98,6 +124,12 @@ st.markdown("""
     .stButton button:hover {
         transform: scale(1.05);
     }
+    .welcome-box {
+        background: rgba(255,255,255,0.1);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -115,11 +147,12 @@ def init_session_state():
         st.session_state.example_count = 0
     if "using_fallback" not in st.session_state:
         st.session_state.using_fallback = {"code": False, "content": False, "business": False}
+    if "show_welcome" not in st.session_state:
+        st.session_state.show_welcome = True
 
 
 def get_random_example(category: str) -> Optional[str]:
     """Get a random unused example from the pool or fallback."""
-    # First try main pool
     if not st.session_state.using_fallback[category]:
         available = [ex for ex in EXAMPLE_POOL[category] 
                      if ex not in st.session_state.used_examples[category]]
@@ -130,10 +163,8 @@ def get_random_example(category: str) -> Optional[str]:
             st.session_state.example_count += 1
             return example
         else:
-            # Switch to fallback pool
             st.session_state.using_fallback[category] = True
     
-    # Use fallback pool
     fallback_available = [ex for ex in FALLBACK_EXAMPLES[category] 
                           if ex not in st.session_state.used_examples[category]]
     
@@ -160,7 +191,7 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
         response = requests.post(
             endpoint,
             json={"task": task, "session_id": st.session_state.session_id},
-            timeout=120  # Increased timeout
+            timeout=120
         )
         response.raise_for_status()
         result = response.json()
@@ -293,6 +324,7 @@ def main():
         st.markdown("### Session Info")
         st.text(f"Session: {st.session_state.session_id[:20]}...")
         st.text(f"Examples used: {st.session_state.example_count}")
+        st.caption("💾 Session memory is enabled")
         
         if st.button("🔄 New Session"):
             import uuid
@@ -301,11 +333,11 @@ def main():
             st.session_state.used_examples = {"code": [], "content": [], "business": []}
             st.session_state.using_fallback = {"code": False, "content": False, "business": False}
             st.session_state.example_count = 0
+            st.session_state.show_welcome = True
             st.rerun()
         
         st.markdown("---")
         st.markdown("### Try Random Examples")
-        st.caption("Click to get a random example")
         
         col1, col2, col3 = st.columns(3)
         
@@ -315,6 +347,7 @@ def main():
                 example = get_random_example("code")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "code"}
+                    st.session_state.show_welcome = False
         
         with col2:
             content_remaining = len(EXAMPLE_POOL["content"]) + len(FALLBACK_EXAMPLES["content"]) - len(st.session_state.used_examples["content"])
@@ -322,6 +355,7 @@ def main():
                 example = get_random_example("content")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "content"}
+                    st.session_state.show_welcome = False
         
         with col3:
             business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(st.session_state.used_examples["business"])
@@ -329,15 +363,18 @@ def main():
                 example = get_random_example("business")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "business"}
+                    st.session_state.show_welcome = False
         
-        # Fallback indicator
-        using_any_fallback = any(st.session_state.using_fallback.values())
-        if using_any_fallback:
+        if any(st.session_state.using_fallback.values()):
             st.caption("🔄 Using extended pool")
     
     # Main content
     st.title("💬 PeerAgent Chat")
     st.markdown("*Your intelligent multi-agent assistant*")
+    
+    # Show welcome message if no messages yet
+    if st.session_state.show_welcome and not st.session_state.messages:
+        st.markdown(WELCOME_MESSAGE)
     
     # Display chat history
     for message in st.session_state.messages:
@@ -347,7 +384,7 @@ def main():
             else:
                 render_response(message["content"])
     
-    # Handle pending example (from button click)
+    # Handle pending example
     if "pending_example" in st.session_state:
         pending = st.session_state.pending_example
         del st.session_state.pending_example
@@ -357,7 +394,6 @@ def main():
         
         st.session_state.messages.append({"role": "user", "content": task})
         
-        # Process immediately
         with st.spinner(f"🔄 Processing with {example_type} agent..."):
             agent_type_to_use = example_type if agent_mode == "Automatic" else agent_mode.lower()
             result = send_task(task, agent_type_to_use)
@@ -367,6 +403,7 @@ def main():
     
     # Chat input
     if task := st.chat_input("Ask me anything..."):
+        st.session_state.show_welcome = False
         st.session_state.messages.append({"role": "user", "content": task})
         
         with st.chat_message("user"):

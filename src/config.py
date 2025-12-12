@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     google_api_key: Optional[str] = None
-    llm_model: str = "gpt-4"
+    llm_model: str = "gpt-4o-mini"  # Cheapest model with good performance
     llm_temperature: float = 0.7
     
     # MongoDB

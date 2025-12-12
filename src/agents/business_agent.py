@@ -229,6 +229,7 @@ IMPORTANT RULES:
         max_questions: int = 3,
         session_id: Optional[str] = None,
         task_id: Optional[str] = None,
+        chat_history: Optional[List[BaseMessage]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -246,15 +247,22 @@ IMPORTANT RULES:
             max_questions: Maximum question rounds before forcing diagnosis
             session_id: Session ID for tracking
             task_id: Task ID for tracking
+            chat_history: Previous conversation messages for context
             
         Returns:
             Dict with either 'questions' (List[str]) or 'diagnosis' (BusinessDiagnosis)
         """
         self.logger.info(f"BusinessSenseAgent executing: {task[:100]}...")
         
+        # Build initial messages with chat history
+        initial_messages = []
+        if chat_history:
+            initial_messages.extend(chat_history)
+        initial_messages.append(HumanMessage(content=task))
+        
         # Initialize state
         initial_state: BusinessAgentState = {
-            "messages": [HumanMessage(content=task)],
+            "messages": initial_messages,
             "task": task,
             "session_id": session_id,
             "questions_asked": 0 if not collected_answers else len(collected_answers),

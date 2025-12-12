@@ -14,6 +14,7 @@ from src.agents.business_agent import BusinessSenseAgent
 from src.agents.problem_agent import ProblemStructuringAgent
 from src.models.responses import AgentType
 from src.utils.logger import log_agent_call, get_logger
+from src.utils.memory import get_memory_store
 
 
 class PeerAgentState(TypedDict):
@@ -198,11 +199,15 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             }
         
         async def route_to_code(state: PeerAgentState) -> Dict[str, Any]:
-            """Route to CodeAgent."""
+            """Route to CodeAgent with conversation history."""
+            # Extract chat history (all messages except current task)
+            chat_history = state["messages"][:-1] if len(state["messages"]) > 1 else []
+            
             result = await self.code_agent.execute(
                 task=state["task"],
                 session_id=state.get("session_id"),
-                task_id=state.get("task_id")
+                task_id=state.get("task_id"),
+                chat_history=chat_history
             )
             return {
                 "agent_result": {
@@ -213,11 +218,15 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             }
         
         async def route_to_content(state: PeerAgentState) -> Dict[str, Any]:
-            """Route to ContentAgent."""
+            """Route to ContentAgent with conversation history."""
+            # Extract chat history (all messages except current task)
+            chat_history = state["messages"][:-1] if len(state["messages"]) > 1 else []
+            
             result = await self.content_agent.execute(
                 task=state["task"],
                 session_id=state.get("session_id"),
-                task_id=state.get("task_id")
+                task_id=state.get("task_id"),
+                chat_history=chat_history
             )
             return {
                 "agent_result": {
@@ -228,11 +237,15 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             }
         
         async def route_to_business(state: PeerAgentState) -> Dict[str, Any]:
-            """Route to BusinessSenseAgent."""
+            """Route to BusinessSenseAgent with conversation history."""
+            # Extract chat history (all messages except current task)
+            chat_history = state["messages"][:-1] if len(state["messages"]) > 1 else []
+            
             result = await self.business_agent.execute(
                 task=state["task"],
                 session_id=state.get("session_id"),
-                task_id=state.get("task_id")
+                task_id=state.get("task_id"),
+                chat_history=chat_history
             )
             return {
                 "agent_result": {
@@ -295,6 +308,7 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
     ) -> Dict[str, Any]:
         """
         Execute the task by routing to the appropriate sub-agent.
+        Uses session memory to maintain conversation context.
         
         Args:
             task: The task description
@@ -306,9 +320,19 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
         """
         self.logger.info(f"PeerAgent processing: {task[:100]}...")
         
+        # Get conversation history from memory
+        memory = get_memory_store()
+        history_messages = []
+        if session_id:
+            history_messages = memory.get_messages(session_id, max_messages=10)
+            self.logger.info(f"Loaded {len(history_messages)} messages from session {session_id}")
+        
+        # Build messages with history for context
+        all_messages = list(history_messages) + [HumanMessage(content=task)]
+        
         # Initialize state
         initial_state: PeerAgentState = {
-            "messages": [HumanMessage(content=task)],
+            "messages": all_messages,
             "task": task,
             "session_id": session_id,
             "task_id": task_id,
@@ -322,7 +346,14 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             final_state = await self.graph.ainvoke(initial_state)
             
             if final_state.get("agent_result"):
-                return final_state["agent_result"]
+                result = final_state["agent_result"]
+                
+                # Store interaction in memory
+                if session_id:
+                    ai_response = str(result.get("data", result))[:500]  # Truncate for memory
+                    memory.add_interaction(session_id, task, ai_response)
+                
+                return result
             else:
                 return {
                     "agent_type": "peer_agent",
@@ -357,16 +388,35 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
         """
         self.logger.info(f"Direct execution with {agent_type}: {task[:100]}...")
         
+        # Get conversation history from memory for context
+        memory = get_memory_store()
+        chat_history = []
+        if session_id:
+            chat_history = memory.get_messages(session_id, max_messages=10)
+        
         try:
             if agent_type == "code":
-                result = await self.code_agent.execute(task, session_id=session_id, task_id=task_id)
+                result = await self.code_agent.execute(
+                    task, session_id=session_id, task_id=task_id, chat_history=chat_history
+                )
+                # Store interaction in memory
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result.model_dump())[:500])
                 return {"agent_type": "code_agent", "data": result.model_dump()}
             elif agent_type == "content":
-                result = await self.content_agent.execute(task, session_id=session_id, task_id=task_id)
+                result = await self.content_agent.execute(
+                    task, session_id=session_id, task_id=task_id, chat_history=chat_history
+                )
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result.model_dump())[:500])
                 return {"agent_type": "content_agent", "data": result.model_dump()}
             elif agent_type == "business":
-                result = await self.business_agent.execute(task, session_id=session_id, task_id=task_id)
+                result = await self.business_agent.execute(
+                    task, session_id=session_id, task_id=task_id, chat_history=chat_history
+                )
                 data = result.get("data")
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result)[:500])
                 return {
                     "agent_type": "business_sense_agent",
                     "data": data.model_dump() if hasattr(data, 'model_dump') else data

@@ -240,11 +240,40 @@ PeerAgent/
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `openai` | LLM provider |
-| `LLM_MODEL` | `gpt-4` | Model name |
+| `LLM_MODEL` | `gpt-4o-mini` | Model name (cheapest with good performance) |
 | `OPENAI_API_KEY` | - | OpenAI API key |
+| `GOOGLE_API_KEY` | - | Google Gemini API key (fallback) |
+| `ANTHROPIC_API_KEY` | - | Anthropic Claude API key (fallback) |
 | `MONGODB_URL` | `mongodb://localhost:27017` | MongoDB connection |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
 | `DEBUG` | `false` | Debug mode |
+
+### 🔄 LLM Provider Fallback
+
+The system automatically falls back to alternative LLM providers if the primary one fails:
+
+```
+OpenAI (primary) → Gemini → Anthropic
+```
+
+**Features:**
+- **Automatic fallback**: If API key is invalid or quota exceeded, tries next provider
+- **Runtime retry**: Auth errors trigger automatic provider switch and retry
+- **Cost-optimized defaults**: Uses cheapest models per provider
+
+| Provider | Default Model | Cost |
+|----------|--------------|------|
+| OpenAI | `gpt-4o-mini` | $0.15/1M tokens |
+| Google | `gemini-1.5-flash` | Free tier available |
+| Anthropic | `claude-3-sonnet` | $3/1M tokens |
+
+**Configure fallback** by setting multiple API keys in `.env`:
+
+```bash
+OPENAI_API_KEY=sk-...       # Primary
+GOOGLE_API_KEY=AIza...      # Fallback 1
+ANTHROPIC_API_KEY=sk-ant-...  # Fallback 2
+```
 
 ---
 
@@ -320,6 +349,157 @@ Instead of Kafka, we added:
 - **Connection Pooling**: 20 Redis connections, 50 MongoDB connections
 - **Celery Tuning**: `worker_prefetch_multiplier=1` for long LLM tasks
 - **Increased Timeouts**: 120s for LLM calls
+
+---
+
+## 🚀 CI/CD Pipeline
+
+### GitHub Actions Workflow
+
+The project uses GitHub Actions for continuous integration and deployment. The pipeline runs on every push to `main` and `develop` branches, and on pull requests to `main`.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CI/CD Pipeline                           │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────────┐  │
+│  │  Lint   │ ──▶│  Test   │ ──▶│  Build  │ ──▶│   Deploy    │  │
+│  │(flake8) │    │(pytest) │    │(Docker) │    │(Production) │  │
+│  └─────────┘    └─────────┘    └─────────┘    └─────────────┘  │
+│                                                                 │
+│  Triggers: push to main/develop, PRs to main                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Pipeline Stages
+
+| Stage | Tools | Description |
+|-------|-------|-------------|
+| **Lint** | flake8, mypy | Code quality and type checking |
+| **Test** | pytest | Unit and integration tests with Redis/MongoDB |
+| **Build** | Docker | Build and push images to GitHub Container Registry |
+| **Deploy** | Custom | Deploy to production (configurable) |
+
+#### Required Secrets
+
+Configure these secrets in your GitHub repository:
+
+| Secret | Description |
+|--------|-------------|
+| `OPENAI_API_KEY` | OpenAI API key for production |
+| `GITHUB_TOKEN` | Auto-provided for container registry |
+
+#### Manual Deployment
+
+```bash
+# Trigger deployment manually
+git push origin main
+
+# Or use GitHub Actions UI:
+# Actions → PeerAgent CI/CD → Run workflow
+```
+
+---
+
+## 🌿 Branch Management
+
+### Git Flow Strategy
+
+We follow a modified Git Flow model:
+
+```
+main (production)
+ │
+ ├── develop (integration)
+ │    │
+ │    ├── feature/add-new-agent
+ │    ├── feature/improve-prompts
+ │    └── feature/api-versioning
+ │
+ └── hotfix/critical-bug-fix
+```
+
+### Branch Types
+
+| Branch | Purpose | Merges Into |
+|--------|---------|-------------|
+| `main` | Production-ready code | - |
+| `develop` | Integration branch | `main` |
+| `feature/*` | New features | `develop` |
+| `hotfix/*` | Critical fixes | `main` + `develop` |
+| `release/*` | Release preparation | `main` + `develop` |
+
+### Workflow
+
+1. **Create Feature Branch**
+   ```bash
+   git checkout develop
+   git pull origin develop
+   git checkout -b feature/my-feature
+   ```
+
+2. **Develop & Commit**
+   ```bash
+   git add .
+   git commit -m "feat: add new functionality"
+   ```
+
+3. **Create Pull Request**
+   - Target: `develop` branch
+   - Request reviews from team members
+   - Ensure CI passes
+
+4. **Merge to Main (Release)**
+   ```bash
+   git checkout main
+   git merge develop
+   git tag -a v1.0.0 -m "Release 1.0.0"
+   git push origin main --tags
+   ```
+
+### Commit Convention
+
+Use conventional commits for clear history:
+
+```
+feat: add new feature
+fix: resolve bug
+docs: update documentation
+refactor: improve code structure
+test: add tests
+chore: maintenance tasks
+```
+
+---
+
+## 📈 Production Recommendations
+
+### Rate Limiting
+
+Add rate limiting with FastAPI middleware:
+
+```python
+from slowapi import Limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+@app.post("/v1/agent/execute")
+@limiter.limit("10/minute")
+async def execute_task(...):
+    ...
+```
+
+### API Versioning
+
+- Current: `/v1/agent/*`
+- Future versions: `/v2/agent/*` with backward compatibility
+- Deprecation notices in response headers
+
+### Scaling Considerations
+
+- **Horizontal**: Add more Celery workers
+- **Vertical**: Increase container resources
+- **Caching**: Redis for frequently accessed data
 
 ---
 

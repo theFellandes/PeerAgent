@@ -153,7 +153,7 @@ asyncio_mode = "auto"
 addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
-    "ignore::PydanticDeprecatedSince20",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
 ]
 
 # Coverage

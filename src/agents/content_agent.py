@@ -1,6 +1,7 @@
 # ContentAgent - Web search and content generation with citations
 from typing import Optional, List
 import re
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
@@ -26,7 +27,10 @@ class ContentAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return """You are a research specialist. Provide accurate, well-structured information.
-Always cite sources when available."""
+Always cite sources when available.
+
+IMPORTANT: Pay attention to the conversation history. If the user has been discussing a specific 
+topic or context, use that information to provide more relevant and contextual responses."""
     
     async def _perform_search(self, query: str) -> tuple[str, List[str]]:
         """Perform web search and return results with URLs."""
@@ -36,7 +40,7 @@ Always cite sources when available."""
             
             sources = []
             if isinstance(results, str):
-                url_pattern = r'https?://[^\s\])]+'
+                url_pattern = r'https?://[^\s\])]+' 
                 sources = list(set(re.findall(url_pattern, results)))[:5]
             
             return results, sources
@@ -50,22 +54,34 @@ Always cite sources when available."""
         search_query: Optional[str] = None,
         session_id: Optional[str] = None,
         task_id: Optional[str] = None,
+        chat_history: Optional[List[BaseMessage]] = None,
         **kwargs
     ) -> ContentOutput:
-        """Generate content based on web search."""
+        """Generate content based on web search.
+        
+        Args:
+            task: The content/research request
+            search_query: Optional custom search query
+            session_id: Session ID for tracking
+            task_id: Task ID for tracking
+            chat_history: Previous conversation messages for context
+        """
         self.logger.info(f"ContentAgent executing: {task[:50]}...")
         
         try:
             query = search_query or task
             search_results, sources = await self._perform_search(query)
             
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", self.system_prompt),
-                ("system", f"Search results:\n{search_results}"),
-                ("human", task)
-            ])
+            # Build messages with chat history for context
+            messages = [SystemMessage(content=self.system_prompt)]
+            messages.append(SystemMessage(content=f"Search results:\n{search_results}"))
             
-            messages = prompt.format_messages()
+            # Include chat history for conversation context
+            if chat_history:
+                messages.extend(chat_history)
+            
+            messages.append(HumanMessage(content=task))
+            
             response = await self.llm.ainvoke(messages)
             content = response.content.strip()
             
