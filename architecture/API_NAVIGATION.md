@@ -11,20 +11,7 @@ Complete guide to navigating and using the PeerAgent API.
 
 ## Quick Start Flow
 
-```mermaid
-flowchart LR
-    A[1. Health Check] --> B[2. Submit Task]
-    B --> C[3. Get Status]
-    C --> D[4. View Result]
-    
-    A1["GET /health"]
-    B1["POST /v1/agent/execute"]
-    C1["GET /v1/agent/status/{id}"]
-    
-    A --- A1
-    B --- B1
-    C --- C1
-```
+![FastAPI Agent Routing-2025-12-13-093749.png](graphs/FastAPI%20Agent%20Routing-2025-12-13-093749.png)
 
 ---
 
