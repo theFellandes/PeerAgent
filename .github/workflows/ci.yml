@@ -1,0 +1,170 @@
+# PeerAgent CI/CD Pipeline
+# .github/workflows/ci.yml
+
+name: PeerAgent CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ theFellandes.peeragent }}
+
+jobs:
+  # ============================================
+  # LINT JOB
+  # ============================================
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black flake8
+
+      - name: Run Flake8 (critical errors only)
+        run: flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        continue-on-error: true
+
+      - name: Run Ruff
+        run: ruff check src/ --exit-zero --output-format=github
+        continue-on-error: true
+
+  # ============================================
+  # TEST JOB
+  # ============================================
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          LLM_PROVIDER=openai
+          OPENAI_API_KEY=test-key-for-mocking
+          LLM_MODEL=gpt-4o-mini
+          MONGODB_URL=mongodb://localhost:27017
+          MONGODB_DB_NAME=peeragent_test
+          REDIS_URL=redis://localhost:6379/0
+          DEBUG=true
+          EOF
+
+      - name: Run Unit Tests
+        run: pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=term-missing
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Run Integration Tests
+        run: pytest tests/integration/ -v --cov=src --cov-report=xml --cov-append
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          MONGODB_URL: mongodb://localhost:27017
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+        continue-on-error: true
+
+  # ============================================
+  # BUILD JOB
+  # ============================================
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.worker
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
