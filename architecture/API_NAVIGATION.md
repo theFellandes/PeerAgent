@@ -169,42 +169,11 @@ Content-Type: application/json
 
 ### Full Workflow
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as API
-    participant P as PeerAgent
-    participant S as Storage
-
-    C->>A: POST /execute
-    A->>A: Validate
-    A->>P: Process
-    P->>P: Classify
-    P->>P: Route to agent
-    P->>S: Log result
-    P-->>A: Result
-    A-->>C: {task_id, status}
-    
-    C->>A: GET /status/{id}
-    A->>S: Lookup
-    S-->>A: Result
-    A-->>C: Full result
-```
+![FastAPI Agent Routing-2025-12-13-094937.png](graphs/FastAPI%20Agent%20Routing-2025-12-13-094937.png)
 
 ### Error Handling Flow
 
-```mermaid
-flowchart TD
-    A[Request] --> B{Valid?}
-    B -->|No| C[400 Bad Request]
-    B -->|Yes| D{Process}
-    D -->|Error| E[500 Server Error]
-    D -->|Success| F[200 OK]
-    
-    G[GET Status] --> H{Found?}
-    H -->|No| I[404 Not Found]
-    H -->|Yes| J[200 With Result]
-```
+![FastAPI Agent Routing-2025-12-13-095003.png](graphs/FastAPI%20Agent%20Routing-2025-12-13-095003.png)
 
 ---
 
