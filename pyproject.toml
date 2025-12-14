@@ -52,6 +52,7 @@ dependencies = [
     
     # Search
     "duckduckgo-search>=4.0.0",
+    "ddgs>=6.0.0",
     
     # Utilities
     "httpx>=0.26.0",

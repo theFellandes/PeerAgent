@@ -13,12 +13,18 @@ from src.utils.logger import get_logger
 
 class ContentAgent(BaseAgent):
     """Agent specialized in web search and content creation with citations."""
-    
+
     def __init__(self, session_id: Optional[str] = None):
         super().__init__(session_id)
         self.logger = get_logger("ContentAgent")
-        self.search_wrapper = DuckDuckGoSearchAPIWrapper(max_results=5)
-        self.search_tool = DuckDuckGoSearchResults(api_wrapper=self.search_wrapper)
+        try:
+            from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
+            self.search_wrapper = DuckDuckGoSearchAPIWrapper(max_results=5)
+            self.search_tool = DuckDuckGoSearchResults(api_wrapper=self.search_wrapper)
+        except ImportError:
+            self.search_wrapper = None  # Fallback for testing
+            self.search_tool = None
+
     
     @property
     def agent_type(self) -> str:
