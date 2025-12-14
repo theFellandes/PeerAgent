@@ -1,23 +1,58 @@
 # AWS CodeDeploy Application Specification
+# Defines deployment lifecycle hooks and file mappings
+
 version: 0.0
 os: linux
 
+# File mapping - what files go where
 files:
   - source: /
     destination: /opt/peeragent
+    overwrite: yes
 
+# File permissions
+permissions:
+  - object: /opt/peeragent
+    owner: peeragent
+    group: peeragent
+    mode: 755
+    type:
+      - directory
+  - object: /opt/peeragent/scripts
+    owner: peeragent
+    group: peeragent  
+    mode: 755
+    type:
+      - file
+
+# Deployment lifecycle hooks
 hooks:
+  # Before installation - prepare server
   BeforeInstall:
     - location: scripts/before_install.sh
       timeout: 300
       runas: root
 
-  ApplicationStart:
-    - location: scripts/start_application.sh
-      timeout: 300
+  # After installation - set permissions
+  AfterInstall:
+    - location: scripts/after_install.sh
+      timeout: 120
       runas: root
 
+  # Start application
+  ApplicationStart:
+    - location: scripts/start_application.sh
+      timeout: 600
+      runas: root
+
+  # Stop application
   ApplicationStop:
     - location: scripts/stop_application.sh
+      timeout: 120
+      runas: root
+
+  # Validate deployment
+  ValidateService:
+    - location: scripts/validate_service.sh
       timeout: 120
       runas: root

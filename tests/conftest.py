@@ -1,9 +1,18 @@
 # Pytest configuration and fixtures
+"""
+Shared fixtures for all tests.
+Provides mock settings, mock LLMs, and test utilities.
+"""
+
 import pytest
 import asyncio
-from typing import Generator, AsyncGenerator
+from typing import Generator, AsyncGenerator, Dict, Any
 from unittest.mock import Mock, patch, AsyncMock
 
+
+# =============================================================================
+# Event Loop Configuration
+# =============================================================================
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -12,6 +21,64 @@ def event_loop():
     yield loop
     loop.close()
 
+
+# =============================================================================
+# Settings Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_settings():
+    """Mock settings for testing without real API keys."""
+    with patch("src.config.get_settings") as mock:
+        settings = Mock()
+        # Application
+        settings.app_name = "PeerAgent"
+        settings.app_version = "2.0.0"
+        settings.debug = True
+        settings.environment = "test"
+        
+        # API
+        settings.api_prefix = "/v1"
+        settings.api_host = "0.0.0.0"
+        settings.api_port = 8000
+        settings.cors_origins = ["*"]
+        
+        # LLM
+        settings.llm_provider = "openai"
+        settings.llm_model = "gpt-4o-mini"
+        settings.llm_temperature = 0.7
+        settings.openai_api_key = "test-openai-key"
+        settings.anthropic_api_key = "test-anthropic-key"
+        settings.google_api_key = "test-google-key"
+        
+        # Database
+        settings.mongodb_url = "mongodb://localhost:27017"
+        settings.mongodb_db_name = "peeragent_test"
+        settings.redis_url = "redis://localhost:6379/0"
+        
+        # Celery
+        settings.celery_broker_url = "redis://localhost:6379/0"
+        settings.celery_result_backend = "redis://localhost:6379/0"
+        
+        # Task Store
+        settings.task_ttl_hours = 24
+        
+        # Session
+        settings.session_ttl_minutes = 60
+        settings.max_messages_per_session = 50
+        
+        # Properties
+        settings.is_production = False
+        settings.is_development = True
+        settings.has_valid_llm_key = True
+        
+        mock.return_value = settings
+        yield settings
+
+
+# =============================================================================
+# LLM Mock Fixtures
+# =============================================================================
 
 @pytest.fixture
 def mock_llm_response():
@@ -22,46 +89,47 @@ def mock_llm_response():
 
 
 @pytest.fixture
-def mock_settings():
-    """Mock settings for testing without real API keys."""
-    with patch("src.config.get_settings") as mock:
-        settings = Mock()
-        settings.llm_provider = "openai"
-        settings.openai_api_key = "test-key"
-        settings.llm_model = "gpt-4"
-        settings.llm_temperature = 0.7
-        settings.mongodb_url = "mongodb://localhost:27017"
-        settings.mongodb_db_name = "peeragent_test"
-        settings.redis_url = "redis://localhost:6379/0"
-        settings.app_name = "PeerAgent"
-        settings.app_version = "1.0.0"
-        settings.api_prefix = "/v1"
-        settings.debug = True
-        mock.return_value = settings
-        yield settings
+def mock_code_response():
+    """Mock response for CodeAgent."""
+    mock_response = Mock()
+    mock_response.content = """Here's the code:
+```python
+def hello_world():
+    '''A simple hello world function.'''
+    return "Hello, World!"
+```
+This function returns a greeting string."""
+    return mock_response
 
 
 @pytest.fixture
-def sample_tasks():
-    """Sample tasks for testing classification."""
-    return {
-        "code": [
-            "Write a Python function to read a file",
-            "Create a JavaScript class for user authentication",
-            "Debug this Python script that has an error"
-        ],
-        "content": [
-            "What is machine learning?",
-            "Find information about climate change",
-            "Explain quantum computing"
-        ],
-        "business": [
-            "Our sales are dropping by 20% yearly",
-            "Help me understand our customer churn problem",
-            "We have operational inefficiencies in our warehouse"
-        ]
-    }
+def mock_content_response():
+    """Mock response for ContentAgent."""
+    mock_response = Mock()
+    mock_response.content = """Machine learning is a subset of artificial intelligence 
+that enables systems to learn and improve from experience without being explicitly programmed.
+It focuses on developing algorithms that can access data and use it to learn for themselves."""
+    return mock_response
 
+
+@pytest.fixture
+def mock_business_questions_response():
+    """Mock response for BusinessSenseAgent questions."""
+    mock_response = Mock()
+    mock_response.content = """{
+        "questions": [
+            "When did you first notice this problem?",
+            "What is the measurable impact on your business?",
+            "Is this problem in your company's TOP 3 priorities?"
+        ],
+        "category": "problem_identification"
+    }"""
+    return mock_response
+
+
+# =============================================================================
+# Database Mock Fixtures
+# =============================================================================
 
 @pytest.fixture
 def mock_mongo_db():
@@ -69,7 +137,9 @@ def mock_mongo_db():
     with patch("src.utils.database.get_mongo_db") as mock:
         mock_db = AsyncMock()
         mock_collection = AsyncMock()
-        mock_collection.insert_one = AsyncMock(return_value=Mock(inserted_id="test-id"))
+        mock_collection.insert_one = AsyncMock(
+            return_value=Mock(inserted_id="test-id")
+        )
         mock_collection.find = Mock(return_value=Mock(
             sort=Mock(return_value=Mock(
                 limit=Mock(return_value=Mock(
@@ -77,6 +147,204 @@ def mock_mongo_db():
                 ))
             ))
         ))
+        mock_collection.find_one = AsyncMock(return_value=None)
         mock_db.__getitem__ = Mock(return_value=mock_collection)
         mock.return_value = mock_db
         yield mock_db
+
+
+@pytest.fixture
+def mock_redis():
+    """Mock Redis client."""
+    with patch("src.utils.database.get_redis_client") as mock:
+        mock_redis = Mock()
+        mock_redis.get = Mock(return_value=None)
+        mock_redis.set = Mock(return_value=True)
+        mock_redis.setex = Mock(return_value=True)
+        mock_redis.delete = Mock(return_value=1)
+        mock_redis.exists = Mock(return_value=0)
+        mock_redis.ping = Mock(return_value=True)
+        mock.return_value = mock_redis
+        yield mock_redis
+
+
+# =============================================================================
+# Agent Mock Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_peer_agent():
+    """Mock PeerAgent for testing."""
+    with patch("src.agents.peer_agent.PeerAgent") as MockAgent:
+        mock_instance = Mock()
+        mock_instance.session_id = "test-session"
+        mock_instance.execute = AsyncMock(return_value={
+            "agent_type": "code_agent",
+            "data": {
+                "code": "def test(): pass",
+                "language": "python",
+                "explanation": "Test function"
+            }
+        })
+        mock_instance.execute_with_agent_type = AsyncMock(return_value={
+            "agent_type": "code_agent",
+            "data": {
+                "code": "def test(): pass",
+                "language": "python",
+                "explanation": "Test function"
+            }
+        })
+        mock_instance.classify_task = AsyncMock(return_value="code")
+        mock_instance._keyword_classify = Mock(return_value="code")
+        
+        # Mock sub-agents
+        mock_instance.code_agent = Mock()
+        mock_instance.content_agent = Mock()
+        mock_instance.business_agent = Mock()
+        
+        MockAgent.return_value = mock_instance
+        yield mock_instance
+
+
+# =============================================================================
+# Sample Data Fixtures
+# =============================================================================
+
+@pytest.fixture
+def sample_tasks() -> Dict[str, list]:
+    """Sample tasks for testing classification."""
+    return {
+        "code": [
+            "Write a Python function to read a file",
+            "Create a JavaScript class for user authentication",
+            "Debug this Python script that has an error",
+            "Implement a REST API endpoint in Java",
+            "Write a SQL query to join two tables"
+        ],
+        "content": [
+            "What is machine learning?",
+            "Find information about climate change",
+            "Explain quantum computing",
+            "Research the latest AI news",
+            "Tell me about blockchain technology"
+        ],
+        "business": [
+            "Our sales are dropping by 20% yearly",
+            "Help me understand our customer churn problem",
+            "We have operational inefficiencies in our warehouse",
+            "Revenue is declining and costs are increasing",
+            "Diagnose our market share loss"
+        ]
+    }
+
+
+@pytest.fixture
+def sample_code_output():
+    """Sample CodeAgent output."""
+    from src.models.agents import CodeOutput
+    return CodeOutput(
+        code="def hello():\n    return 'Hello, World!'",
+        language="python",
+        explanation="A simple function that returns a greeting."
+    )
+
+
+@pytest.fixture
+def sample_content_output():
+    """Sample ContentAgent output."""
+    from src.models.agents import ContentOutput
+    return ContentOutput(
+        content="Machine learning is a subset of AI...",
+        sources=[
+            "https://en.wikipedia.org/wiki/Machine_learning",
+            "https://www.ibm.com/topics/machine-learning"
+        ]
+    )
+
+
+@pytest.fixture
+def sample_business_diagnosis():
+    """Sample BusinessSenseAgent diagnosis."""
+    from src.models.agents import BusinessDiagnosis
+    return BusinessDiagnosis(
+        customer_stated_problem="Sales dropped 20% this quarter",
+        identified_business_problem="Market share erosion due to competitive pressure",
+        hidden_root_risk="Brand perception degradation among target segments",
+        urgency_level="Critical"
+    )
+
+
+@pytest.fixture
+def sample_problem_tree():
+    """Sample ProblemStructuringAgent output."""
+    from src.models.agents import ProblemTree, ProblemCause
+    return ProblemTree(
+        problem_type="Growth",
+        main_problem="Declining Sales",
+        root_causes=[
+            ProblemCause(
+                cause="Marketing Inefficiency",
+                sub_causes=["Wrong targeting", "Weak ad optimization", "Low conversion rate"]
+            ),
+            ProblemCause(
+                cause="Competitive Pressure",
+                sub_causes=["Lower competitor prices", "Better competitor products"]
+            ),
+            ProblemCause(
+                cause="Sales Operations",
+                sub_causes=["Long sales cycle", "Weak lead follow-up"]
+            )
+        ]
+    )
+
+
+# =============================================================================
+# Utility Fixtures
+# =============================================================================
+
+@pytest.fixture
+def cleanup_memory():
+    """Fixture to clean up memory store after tests."""
+    from src.utils.memory import get_memory_store
+    memory = get_memory_store()
+    
+    yield memory
+    
+    # Cleanup
+    memory.cleanup_expired()
+
+
+@pytest.fixture
+def cleanup_task_store():
+    """Fixture to clean up task store after tests."""
+    from src.utils.task_store import get_task_store
+    store = get_task_store()
+    
+    yield store
+    
+    # Cleanup
+    store.cleanup_expired()
+
+
+# =============================================================================
+# API Test Client Fixtures
+# =============================================================================
+
+@pytest.fixture
+def test_client(mock_settings):
+    """Create test client for FastAPI app."""
+    from src.api.main import create_app
+    from fastapi.testclient import TestClient
+    
+    app = create_app()
+    return TestClient(app)
+
+
+@pytest.fixture
+def async_test_client(mock_settings):
+    """Create async test client for FastAPI app."""
+    from src.api.main import create_app
+    from httpx import AsyncClient
+    
+    app = create_app()
+    return AsyncClient(app=app, base_url="http://test")

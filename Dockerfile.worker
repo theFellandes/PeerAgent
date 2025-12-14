@@ -1,10 +1,23 @@
 # Dockerfile for Celery Worker
+# Processes async tasks from the queue
+
 FROM python:3.11-slim
+
+# Build arguments
+ARG VERSION=1.2.0
+
+# Labels
+LABEL org.opencontainers.image.title="PeerAgent Worker" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.description="Celery worker for PeerAgent"
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    # Celery settings
+    CELERY_CONCURRENCY=4 \
+    CELERY_LOGLEVEL=info
 
 # Set work directory
 WORKDIR /app
@@ -22,9 +35,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 
 # Create non-root user for security
-RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app
+RUN groupadd --gid 1000 appgroup \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appgroup /app
+
+# Switch to non-root user
 USER appuser
 
+# Health check - check if celery process is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD celery -A src.worker.celery_app inspect ping || exit 1
+
 # Run the Celery worker
-CMD ["celery", "-A", "src.worker.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+CMD ["sh", "-c", "celery -A src.worker.celery_app worker \
+    --loglevel=${CELERY_LOGLEVEL} \
+    --concurrency=${CELERY_CONCURRENCY}"]
