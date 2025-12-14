@@ -1,24 +1,32 @@
-# Agent API Routes
-from typing import Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request
+# Agent API Routes - Improved with Redis Task Store
+"""
+Enhanced API routes with:
+- Redis-backed persistent task storage
+- Better error handling
+- Queue integration
+- Comprehensive logging
+"""
+
+from typing import Optional, List
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import uuid
-import json
 from datetime import datetime
 
 from src.models.requests import TaskExecuteRequest, BusinessQuestionInput
 from src.models.responses import (
-    TaskResponse, 
-    TaskStatusResponse, 
+    TaskResponse,
+    TaskStatusResponse,
     TaskStatus,
     ErrorResponse,
     AgentType
 )
 from src.agents.peer_agent import PeerAgent
-from src.config import get_settings
+from src.utils.task_store import get_task_store, TaskData, TaskStatus as StoreStatus
 from src.utils.logger import get_logger
+from src.config import get_settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/agent", tags=["Agent"])
@@ -26,22 +34,29 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 # Rate limiter (shared with main app)
 limiter = Limiter(key_func=get_remote_address)
 
-# In-memory task storage (replace with Redis in production)
-task_store: dict = {}
-
 
 def get_peer_agent() -> PeerAgent:
     """Dependency to get PeerAgent instance."""
     return PeerAgent()
 
 
+def map_status(store_status: StoreStatus) -> TaskStatus:
+    """Map task store status to response status."""
+    return TaskStatus(store_status.value)
+
+
+# ==============================================================================
+# Task Execution Endpoints
+# ==============================================================================
+
 @router.post(
     "/execute",
     response_model=TaskResponse,
     responses={
-        400: {"model": ErrorResponse, "description": "Bad Request"},
+        400: {"model": ErrorResponse, "description": "Bad Request - Empty task"},
         429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"},
-        500: {"model": ErrorResponse, "description": "Internal Server Error"}
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+        503: {"model": ErrorResponse, "description": "Service Unavailable - Redis down"}
     },
     summary="Execute Agent Task",
     description="""
@@ -71,7 +86,7 @@ async def execute_task(
     Execute a task via the PeerAgent system.
     
     For synchronous processing, the task is executed immediately.
-    For async processing (with queue), a task_id is returned for status polling.
+    Task state is persisted in Redis for durability.
     """
     # Validate input
     if not body.task or not body.task.strip():
@@ -80,25 +95,32 @@ async def execute_task(
             detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
         )
     
-    # Generate task ID
+    # Generate identifiers
     task_id = f"task-{uuid.uuid4().hex[:12]}"
     session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
     
     logger.info(f"Received task {task_id}: {body.task[:100]}...")
     
-    # For synchronous mode: execute immediately
-    # (Queue mode would push to Celery instead)
+    # Get task store
     try:
-        # Store initial task state
-        task_store[task_id] = {
-            "task_id": task_id,
-            "status": TaskStatus.PROCESSING,
-            "task": body.task,
-            "session_id": session_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "result": None,
-            "error": None
-        }
+        task_store = get_task_store()
+    except Exception as e:
+        logger.error(f"Task store unavailable: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Task storage unavailable", "code": "STORAGE_ERROR"}
+        )
+    
+    try:
+        # Create initial task record
+        task_data = TaskData(
+            task_id=task_id,
+            status=StoreStatus.PROCESSING,
+            task=body.task,
+            session_id=session_id,
+            metadata=body.context or {}
+        )
+        task_store.create(task_data)
         
         # Execute the task
         result = await peer_agent.execute(
@@ -107,9 +129,9 @@ async def execute_task(
             task_id=task_id
         )
         
-        # Update task state with result
-        task_store[task_id].update({
-            "status": TaskStatus.COMPLETED,
+        # Update task with result
+        task_store.update(task_id, {
+            "status": StoreStatus.COMPLETED,
             "result": result,
             "completed_at": datetime.utcnow().isoformat(),
             "agent_type": result.get("agent_type")
@@ -126,19 +148,100 @@ async def execute_task(
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}")
         
-        # Update task state with error
-        if task_id in task_store:
-            task_store[task_id].update({
-                "status": TaskStatus.FAILED,
+        # Update task with error
+        try:
+            task_store.update(task_id, {
+                "status": StoreStatus.FAILED,
                 "error": str(e),
                 "completed_at": datetime.utcnow().isoformat()
             })
+        except Exception:
+            pass  # Best effort
         
         raise HTTPException(
             status_code=500,
             detail={"error": str(e), "code": "EXECUTION_ERROR"}
         )
 
+
+@router.post(
+    "/execute/async",
+    response_model=TaskResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"}
+    },
+    summary="Execute Task Asynchronously",
+    description="""
+Submit a task for asynchronous execution via Celery queue.
+
+Returns immediately with a task_id for status polling.
+
+**Rate Limit:** 10 requests per minute
+    """
+)
+@limiter.limit("10/minute")
+async def execute_task_async(
+    request: Request,
+    body: TaskExecuteRequest,
+    background_tasks: BackgroundTasks
+) -> TaskResponse:
+    """
+    Submit a task to the Celery queue for async processing.
+    """
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    task_id = f"task-{uuid.uuid4().hex[:12]}"
+    session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
+    
+    # Create task record
+    task_store = get_task_store()
+    task_data = TaskData(
+        task_id=task_id,
+        status=StoreStatus.PENDING,
+        task=body.task,
+        session_id=session_id,
+        metadata={"async": True, **(body.context or {})}
+    )
+    task_store.create(task_data)
+    
+    # Queue the task
+    try:
+        from src.worker.tasks import execute_agent_task
+        execute_agent_task.delay(
+            task=body.task,
+            session_id=session_id,
+            task_id=task_id,
+            context=body.context
+        )
+        
+        logger.info(f"Task {task_id} queued for async processing")
+        
+        return TaskResponse(
+            task_id=task_id,
+            status=TaskStatus.PENDING,
+            message="Task queued for processing"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to queue task {task_id}: {e}")
+        task_store.update(task_id, {
+            "status": StoreStatus.FAILED,
+            "error": f"Queue error: {e}"
+        })
+        raise HTTPException(
+            status_code=500,
+            detail={"error": f"Failed to queue task: {e}", "code": "QUEUE_ERROR"}
+        )
+
+
+# ==============================================================================
+# Task Status Endpoints
+# ==============================================================================
 
 @router.get(
     "/status/{task_id}",
@@ -154,32 +257,95 @@ async def execute_task(
 async def get_task_status(request: Request, task_id: str) -> TaskStatusResponse:
     """
     Get the status of a task by ID.
-    
-    Returns the current status, result (if completed), or error (if failed).
     """
-    if task_id not in task_store:
+    task_store = get_task_store()
+    task_data = task_store.get(task_id)
+    
+    if task_data is None:
         raise HTTPException(
             status_code=404,
             detail={"error": f"Task {task_id} not found", "code": "TASK_NOT_FOUND"}
         )
     
-    task_data = task_store[task_id]
-    
     return TaskStatusResponse(
         task_id=task_id,
-        status=task_data["status"],
-        result=task_data.get("result"),
-        error=task_data.get("error"),
-        agent_type=task_data.get("agent_type"),
-        created_at=task_data.get("created_at"),
-        completed_at=task_data.get("completed_at")
+        status=map_status(task_data.status),
+        result=task_data.result,
+        error=task_data.error,
+        agent_type=task_data.agent_type,
+        created_at=task_data.created_at,
+        completed_at=task_data.completed_at
     )
 
+
+@router.get(
+    "/tasks",
+    response_model=List[TaskStatusResponse],
+    summary="List Tasks",
+    description="List recent tasks with optional filtering."
+)
+@limiter.limit("20/minute")
+async def list_tasks(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status: Optional[str] = Query(default=None),
+    session_id: Optional[str] = Query(default=None)
+) -> List[TaskStatusResponse]:
+    """
+    List tasks with optional filtering.
+    """
+    task_store = get_task_store()
+    
+    # Get tasks
+    if session_id:
+        tasks = task_store.get_session_tasks(session_id, limit=limit)
+    else:
+        status_filter = StoreStatus(status) if status else None
+        tasks = task_store.list_tasks(limit=limit, offset=offset, status=status_filter)
+    
+    return [
+        TaskStatusResponse(
+            task_id=t.task_id,
+            status=map_status(t.status),
+            result=t.result,
+            error=t.error,
+            agent_type=t.agent_type,
+            created_at=t.created_at,
+            completed_at=t.completed_at
+        )
+        for t in tasks
+    ]
+
+
+@router.delete(
+    "/tasks/{task_id}",
+    summary="Delete Task",
+    description="Delete a task record."
+)
+async def delete_task(task_id: str) -> dict:
+    """Delete a task from the store."""
+    task_store = get_task_store()
+    
+    if not task_store.exists(task_id):
+        raise HTTPException(
+            status_code=404,
+            detail={"error": f"Task {task_id} not found", "code": "TASK_NOT_FOUND"}
+        )
+    
+    task_store.delete(task_id)
+    return {"deleted": task_id}
+
+
+# ==============================================================================
+# Direct Agent Execution
+# ==============================================================================
 
 @router.post(
     "/execute/direct/{agent_type}",
     response_model=TaskResponse,
     responses={
+        400: {"model": ErrorResponse, "description": "Invalid agent type"},
         429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"}
     },
     summary="Execute with Specific Agent",
@@ -192,6 +358,7 @@ Execute a task directly with a specified agent type, bypassing automatic classif
 - `code`: Code generation tasks
 - `content`: Research and content tasks  
 - `business`: Business problem diagnosis
+- `problem`: Problem structuring (requires prior diagnosis)
     """
 )
 @limiter.limit("10/minute")
@@ -202,7 +369,8 @@ async def execute_direct(
     peer_agent: PeerAgent = Depends(get_peer_agent)
 ) -> TaskResponse:
     """Execute a task with a specific agent type."""
-    valid_types = ["code", "content", "business"]
+    valid_types = ["code", "content", "business", "problem"]
+    
     if agent_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -212,20 +380,29 @@ async def execute_direct(
             }
         )
     
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
     task_id = f"task-{uuid.uuid4().hex[:12]}"
     session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
     
+    task_store = get_task_store()
+    
     try:
-        task_store[task_id] = {
-            "task_id": task_id,
-            "status": TaskStatus.PROCESSING,
-            "task": body.task,
-            "session_id": session_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "result": None,
-            "error": None
-        }
+        # Create task record
+        task_data = TaskData(
+            task_id=task_id,
+            status=StoreStatus.PROCESSING,
+            task=body.task,
+            session_id=session_id,
+            metadata={"direct": True, "agent_type": agent_type}
+        )
+        task_store.create(task_data)
         
+        # Execute with specific agent
         result = await peer_agent.execute_with_agent_type(
             task=body.task,
             agent_type=agent_type,
@@ -233,8 +410,9 @@ async def execute_direct(
             task_id=task_id
         )
         
-        task_store[task_id].update({
-            "status": TaskStatus.COMPLETED,
+        # Update task
+        task_store.update(task_id, {
+            "status": StoreStatus.COMPLETED,
             "result": result,
             "completed_at": datetime.utcnow().isoformat(),
             "agent_type": result.get("agent_type")
@@ -248,13 +426,16 @@ async def execute_direct(
         
     except Exception as e:
         logger.error(f"Direct execution failed: {e}")
-        if task_id in task_store:
-            task_store[task_id].update({
-                "status": TaskStatus.FAILED,
-                "error": str(e)
-            })
+        task_store.update(task_id, {
+            "status": StoreStatus.FAILED,
+            "error": str(e)
+        })
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
+
+# ==============================================================================
+# Business Analysis Endpoints
+# ==============================================================================
 
 @router.post(
     "/business/continue",
@@ -263,32 +444,49 @@ async def execute_direct(
     description="Continue a business analysis session by providing answers to follow-up questions."
 )
 async def continue_business_analysis(
-    request: BusinessQuestionInput,
+    body: BusinessQuestionInput,
     peer_agent: PeerAgent = Depends(get_peer_agent)
 ) -> TaskResponse:
     """Continue an ongoing business analysis with answers to questions."""
+    if not body.answers:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Answers cannot be empty", "code": "EMPTY_ANSWERS"}
+        )
+    
     task_id = f"task-{uuid.uuid4().hex[:12]}"
+    task_store = get_task_store()
     
     try:
         # Get business agent directly
         business_agent = peer_agent.business_agent
         
+        # Get previous task from session for context
+        session_tasks = task_store.get_session_tasks(body.session_id, limit=5)
+        previous_task = ""
+        for t in session_tasks:
+            if t.task:
+                previous_task = t.task
+                break
+        
         result = await business_agent.execute(
-            task="Continue analysis with provided answers",
-            collected_answers=request.answers,
-            session_id=request.session_id,
+            task=previous_task or "Continue analysis with provided answers",
+            collected_answers=body.answers,
+            session_id=body.session_id,
             task_id=task_id
         )
         
-        task_store[task_id] = {
-            "task_id": task_id,
-            "status": TaskStatus.COMPLETED,
-            "result": result,
-            "session_id": request.session_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "completed_at": datetime.utcnow().isoformat(),
-            "agent_type": "business_sense_agent"
-        }
+        # Store result
+        task_data = TaskData(
+            task_id=task_id,
+            status=StoreStatus.COMPLETED,
+            task="Business analysis continuation",
+            session_id=body.session_id,
+            result=result,
+            agent_type="business_sense_agent",
+            completed_at=datetime.utcnow().isoformat()
+        )
+        task_store.create(task_data)
         
         return TaskResponse(
             task_id=task_id,
@@ -301,22 +499,40 @@ async def continue_business_analysis(
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
+# ==============================================================================
+# Utility Endpoints
+# ==============================================================================
+
 @router.get(
     "/classify",
     summary="Classify Task",
     description="Classify a task without executing it (useful for debugging routing)."
 )
 async def classify_task(
-    task: str,
+    task: str = Query(..., min_length=1),
     peer_agent: PeerAgent = Depends(get_peer_agent)
 ) -> dict:
     """Classify a task to see which agent would handle it."""
-    if not task.strip():
-        raise HTTPException(status_code=400, detail={"error": "Task cannot be empty"})
-    
     classification = await peer_agent.classify_task(task)
+    
+    # Get keyword matches for debugging
+    keyword_result = peer_agent._keyword_classify(task)
+    
     return {
         "task": task,
         "classification": classification,
-        "agent": f"{classification}_agent"
+        "agent": f"{classification}_agent",
+        "routing_method": "keyword" if keyword_result else "llm",
+        "keyword_match": keyword_result
     }
+
+
+@router.get(
+    "/stats",
+    summary="Get Task Statistics",
+    description="Get statistics about task processing."
+)
+async def get_stats() -> dict:
+    """Get task store statistics."""
+    task_store = get_task_store()
+    return task_store.get_stats()

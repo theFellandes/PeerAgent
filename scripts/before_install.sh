@@ -1,31 +1,57 @@
 #!/bin/bash
-# Before Install Script for CodeDeploy
+# Before Install Hook for AWS CodeDeploy
+# Prepares the server for deployment
 
 set -e
 
-echo "=== Before Install ==="
+echo "==============================================="
+echo "PeerAgent - Before Install"
+echo "==============================================="
 
-# Install Docker if not present
-if ! command -v docker &> /dev/null; then
-    echo "Installing Docker..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    systemctl start docker
-    systemctl enable docker
+# Update system packages
+echo "Updating system packages..."
+apt-get update -y
+
+# Install required dependencies
+echo "Installing dependencies..."
+apt-get install -y \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    docker.io \
+    docker-compose-v2 \
+    curl \
+    git
+
+# Start Docker service if not running
+echo "Starting Docker service..."
+systemctl start docker || true
+systemctl enable docker || true
+
+# Create application directory
+APP_DIR="/opt/peeragent"
+echo "Creating application directory: ${APP_DIR}"
+mkdir -p ${APP_DIR}
+
+# Clean up old deployment (keep logs)
+echo "Cleaning up old deployment..."
+rm -rf ${APP_DIR}/src
+rm -rf ${APP_DIR}/tests
+rm -rf ${APP_DIR}/ui
+rm -f ${APP_DIR}/*.py
+rm -f ${APP_DIR}/*.txt
+rm -f ${APP_DIR}/*.toml
+rm -f ${APP_DIR}/*.yml
+rm -f ${APP_DIR}/*.yaml
+rm -f ${APP_DIR}/Dockerfile*
+
+# Create peeragent user if doesn't exist
+if ! id "peeragent" &>/dev/null; then
+    echo "Creating peeragent user..."
+    useradd -r -s /bin/false peeragent
 fi
 
-# Install Docker Compose if not present
-if ! command -v docker-compose &> /dev/null; then
-    echo "Installing Docker Compose..."
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-fi
+# Add peeragent to docker group
+usermod -aG docker peeragent || true
 
-# Clean up old deployment
-if [ -d "/opt/peeragent" ]; then
-    echo "Cleaning up old deployment..."
-    cd /opt/peeragent
-    docker-compose down --remove-orphans || true
-fi
-
-echo "Before install complete"
+echo "Before install completed successfully"

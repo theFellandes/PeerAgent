@@ -1,29 +1,31 @@
 # PeerAgent CI/CD Pipeline
-# .github/workflows/ci.yml
+# Comprehensive workflow for testing, building, and deploying
 
 name: PeerAgent CI/CD
 
 on:
   push:
     branches: [main, develop]
+    tags: ['v*']
   pull_request:
     branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger
 
 env:
   PYTHON_VERSION: "3.11"
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ theFellandes.peeragent }}
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # ============================================
-  # LINT JOB
-  # ============================================
+  # ===========================================================================
+  # Code Quality & Linting
+  # ===========================================================================
   lint:
     name: Code Quality
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,35 +36,33 @@ jobs:
       - name: Install linting tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff black flake8
+          pip install ruff black mypy isort
 
-      - name: Run Flake8 (critical errors only)
-        run: flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+      - name: Run ruff (linting)
+        run: ruff check src/ --output-format=github
         continue-on-error: true
 
-      - name: Run Ruff
-        run: ruff check src/ --exit-zero --output-format=github
+      - name: Run black (formatting check)
+        run: black --check src/
         continue-on-error: true
 
-  # ============================================
-  # TEST JOB
-  # ============================================
+      - name: Run isort (import sorting)
+        run: isort --check-only src/
+        continue-on-error: true
+
+      - name: Run mypy (type checking)
+        run: mypy src/ --ignore-missing-imports
+        continue-on-error: true
+
+  # ===========================================================================
+  # Unit Tests
+  # ===========================================================================
   test:
     name: Tests
     runs-on: ubuntu-latest
     needs: lint
     
     services:
-      mongodb:
-        image: mongo:7.0
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --eval 'db.adminCommand({ping: 1})'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
       redis:
         image: redis:7-alpine
         ports:
@@ -73,8 +73,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -85,55 +96,76 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov
+          pip install -e ".[dev]"
 
-      - name: Create .env file
-        run: |
-          cat > .env << EOF
-          LLM_PROVIDER=openai
-          OPENAI_API_KEY=test-key-for-mocking
-          LLM_MODEL=gpt-4o-mini
-          MONGODB_URL=mongodb://localhost:27017
-          MONGODB_DB_NAME=peeragent_test
-          REDIS_URL=redis://localhost:6379/0
-          DEBUG=true
-          EOF
-
-      - name: Run Unit Tests
-        run: pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=term-missing
+      - name: Run unit tests
         env:
-          PYTHONPATH: ${{ github.workspace }}
-
-      - name: Run Integration Tests
-        run: pytest tests/integration/ -v --cov=src --cov-report=xml --cov-append
-        env:
-          PYTHONPATH: ${{ github.workspace }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
           MONGODB_URL: mongodb://localhost:27017
           REDIS_URL: redis://localhost:6379/0
+          DEBUG: true
+        run: |
+          pytest tests/unit/ -v --tb=short --cov=src --cov-report=xml --cov-report=term
 
-      - name: Upload coverage
+      - name: Run integration tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
+          MONGODB_URL: mongodb://localhost:27017
+          REDIS_URL: redis://localhost:6379/0
+          DEBUG: true
+        run: |
+          pytest tests/integration/ -v --tb=short
+        continue-on-error: true  # Integration tests may need real API keys
+
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
         continue-on-error: true
 
-  # ============================================
-  # BUILD JOB
-  # ============================================
+  # ===========================================================================
+  # Security Scan
+  # ===========================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install safety
+        run: pip install safety bandit
+
+      - name: Run safety check
+        run: safety check --full-report
+        continue-on-error: true
+
+      - name: Run bandit security scan
+        run: bandit -r src/ -ll
+        continue-on-error: true
+
+  # ===========================================================================
+  # Build Docker Images
+  # ===========================================================================
   build:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    needs: [test, security]
+    if: github.event_name != 'pull_request'
     
-    permissions:
-      contents: read
-      packages: write
-
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -145,17 +177,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata for API image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+
       - name: Build and push API image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
 
       - name: Build and push Worker image
         uses: docker/build-push-action@v5
@@ -163,8 +208,104 @@ jobs:
           context: .
           file: ./Dockerfile.worker
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push UI image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.ui
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-ui:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===========================================================================
+  # Deploy to Staging (develop branch)
+  # ===========================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.peeragent.example.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        run: |
+          echo "Deploying to staging environment..."
+          # Add your deployment commands here
+          # Examples:
+          # - SSH to server and docker-compose pull && docker-compose up -d
+          # - kubectl apply -f k8s/staging/
+          # - aws ecs update-service
+
+  # ===========================================================================
+  # Deploy to Production (main branch, tagged releases)
+  # ===========================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: https://peeragent.example.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production environment..."
+          # Add your production deployment commands here
+
+  # ===========================================================================
+  # Create Release (on tags)
+  # ===========================================================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            docker-compose.yml
+            README.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===========================================================================
+  # Notify on Failure
+  # ===========================================================================
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, build]
+    if: failure()
+    
+    steps:
+      - name: Send notification
+        run: |
+          echo "Pipeline failed! Sending notification..."
+          # Add notification commands (Slack, email, etc.)
+          # Example for Slack:
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"PeerAgent CI/CD failed on ${{ github.ref }}"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -4,29 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "peeragent"
-version = "1.0.0"
-description = "Multi-Agent AI System with LangGraph orchestration"
+version = "1.2.0"
+description = "Multi-Agent AI System with LangGraph orchestration - Production Ready"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "PeerAgent Team"}
+    {name = "theFellandes"}
 ]
-keywords = ["ai", "agents", "langgraph", "langchain", "fastapi", "multi-agent"]
+keywords = ["ai", "agents", "langgraph", "langchain", "fastapi", "multi-agent", "websocket"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Framework :: FastAPI",
 ]
 
 dependencies = [
     # Core Framework
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
+    "gunicorn>=21.2.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     
@@ -46,15 +48,16 @@ dependencies = [
     
     # Task Queue
     "celery[redis]>=5.3.0",
+    "flower>=2.0.0",
     
     # Search
     "duckduckgo-search>=4.0.0",
-    "ddgs>=6.0.0",
     
     # Utilities
     "httpx>=0.26.0",
     "python-dotenv>=1.0.0",
-    "slowapi>=0.1.9",  # Rate limiting
+    "slowapi>=0.1.9",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +70,8 @@ dev = [
     "black>=24.0.0",
     "isort>=5.13.0",
     "pre-commit>=3.6.0",
+    "bandit>=1.7.0",
+    "safety>=2.3.0",
 ]
 ui = [
     "streamlit>=1.30.0",
@@ -76,20 +81,20 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/peeragent"
-Documentation = "https://github.com/your-org/peeragent#readme"
-Repository = "https://github.com/your-org/peeragent"
-Issues = "https://github.com/your-org/peeragent/issues"
+Homepage = "https://github.com/theFellandes/PeerAgent"
+Documentation = "https://github.com/theFellandes/PeerAgent#readme"
+Repository = "https://github.com/theFellandes/PeerAgent"
+Issues = "https://github.com/theFellandes/PeerAgent/issues"
 
 [project.scripts]
-peeragent = "src.api.main:main"
+peeragent = "main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.yaml", "*.json"]
+"*" = ["*.yaml", "*.json", "*.env.example"]
 
 # Ruff - Fast Python linter
 [tool.ruff]
@@ -103,15 +108,22 @@ select = [
     "B",      # flake8-bugbear
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
+    "ARG",    # unused arguments
+    "SIM",    # simplify
 ]
 ignore = [
     "E501",   # line too long (handled by black)
     "B008",   # do not perform function calls in argument defaults
     "C901",   # too complex
+    "ARG001", # unused argument
+    "ARG002", # unused method argument
 ]
 
 [tool.ruff.isort]
 known-first-party = ["src"]
+
+[tool.ruff.per-file-ignores]
+"tests/**" = ["ARG001", "ARG002"]
 
 # Black - Code formatter
 [tool.black]
@@ -125,6 +137,7 @@ exclude = '''
     | __pycache__
     | build
     | dist
+    | node_modules
 )/
 '''
 
@@ -135,6 +148,7 @@ warn_return_any = true
 warn_unused_ignores = true
 ignore_missing_imports = true
 strict_optional = true
+plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -142,6 +156,8 @@ module = [
     "langgraph.*",
     "celery.*",
     "motor.*",
+    "redis.*",
+    "streamlit.*",
 ]
 ignore_missing_imports = true
 
@@ -151,7 +167,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -W ignore::DeprecationWarning"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
@@ -164,6 +180,7 @@ branch = true
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
+    "*/migrations/*",
 ]
 
 [tool.coverage.report]
@@ -173,4 +190,19 @@ exclude_lines = [
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
+    "@abstractmethod",
 ]
+show_missing = true
+fail_under = 60
+
+# isort
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["src"]
+skip = [".venv", "build", "dist"]
+
+# Bandit - Security scanner
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = ["B101"]  # Skip assert_used

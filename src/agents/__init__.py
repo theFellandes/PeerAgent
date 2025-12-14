@@ -1,4 +1,8 @@
 # PeerAgent Agents Module
+"""
+Specialized AI agents for different task types.
+"""
+
 from src.agents.base import BaseAgent
 from src.agents.peer_agent import PeerAgent
 from src.agents.code_agent import CodeAgent

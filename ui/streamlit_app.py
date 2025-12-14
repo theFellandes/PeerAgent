@@ -10,15 +10,15 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 # Welcome message (not sent to LLM, just displayed in UI)
 WELCOME_MESSAGE = """
-## 👋 Welcome to PeerAgent!
+## ðŸ‘‹ Welcome to PeerAgent!
 
 I'm your intelligent multi-agent assistant. I can help you with:
 
 | Agent | What I Can Do |
 |-------|--------------|
-| 💻 **Code** | Write code in Python, Java, SQL, JavaScript, and more |
-| 📚 **Research** | Find and summarize information on any topic |
-| 📈 **Business** | Diagnose business problems using Socratic questioning |
+| ðŸ’» **Code** | Write code in Python, Java, SQL, JavaScript, and more |
+| ðŸ“š **Research** | Find and summarize information on any topic |
+| ðŸ“ˆ **Business** | Diagnose business problems using Socratic questioning |
 
 ### How to use:
 1. **Type your question** in the chat box below
@@ -102,7 +102,7 @@ FALLBACK_EXAMPLES = {
 # Page configuration
 st.set_page_config(
     page_title="PeerAgent - AI Assistant",
-    page_icon="🤖",
+    page_icon="ðŸ¤–",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -249,12 +249,12 @@ def render_business_output(data: dict):
         for i, q in enumerate(questions, 1):
             st.markdown(f"{i}. {q}")
     elif output_type == "diagnosis" or "customer_stated_problem" in output_data:
-        st.markdown("### 📊 Business Diagnosis")
+        st.markdown("### ðŸ“Š Business Diagnosis")
         st.markdown(f"**Customer Stated Problem:** {output_data.get('customer_stated_problem', 'N/A')}")
         st.markdown(f"**Identified Business Problem:** {output_data.get('identified_business_problem', 'N/A')}")
         st.markdown(f"**Hidden Root Risk:** {output_data.get('hidden_root_risk', 'N/A')}")
         urgency = output_data.get("urgency_level", "Medium")
-        urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
+        urgency_color = {"Low": "ðŸŸ¢", "Medium": "ðŸŸ¡", "Critical": "ðŸ”´"}.get(urgency, "ðŸŸ¡")
         st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
     else:
         st.json(output_data)
@@ -263,7 +263,7 @@ def render_business_output(data: dict):
 def render_response(result: dict):
     """Render the API response based on agent type."""
     if "error" in result and result["error"]:
-        st.error(f"❌ Error: {result['error']}")
+        st.error(f"âŒ Error: {result['error']}")
         return
     
     agent_type = result.get("agent_type")
@@ -276,10 +276,10 @@ def render_response(result: dict):
             data = data["data"]
     
     agent_names = {
-        "code_agent": "💻 Code Agent",
-        "content_agent": "📚 Content Agent",
-        "business_sense_agent": "📈 Business Agent",
-        "peer_agent": "🤖 Peer Agent"
+        "code_agent": "ðŸ’» Code Agent",
+        "content_agent": "ðŸ“š Content Agent",
+        "business_sense_agent": "ðŸ“ˆ Business Agent",
+        "peer_agent": "ðŸ¤– Peer Agent"
     }
     st.markdown(f"*{agent_names.get(agent_type, str(agent_type))}*")
     
@@ -310,7 +310,7 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.title("🤖 PeerAgent")
+        st.title("ðŸ¤– PeerAgent")
         st.markdown("---")
         
         st.markdown("### Agent Selection")
@@ -324,9 +324,9 @@ def main():
         st.markdown("### Session Info")
         st.text(f"Session: {st.session_state.session_id[:20]}...")
         st.text(f"Examples used: {st.session_state.example_count}")
-        st.caption("💾 Session memory is enabled")
+        st.caption("ðŸ’¾ Session memory is enabled")
         
-        if st.button("🔄 New Session"):
+        if st.button("ðŸ”„ New Session"):
             import uuid
             st.session_state.session_id = f"session-{uuid.uuid4().hex[:8]}"
             st.session_state.messages = []
@@ -343,7 +343,7 @@ def main():
         
         with col1:
             code_remaining = len(EXAMPLE_POOL["code"]) + len(FALLBACK_EXAMPLES["code"]) - len(st.session_state.used_examples["code"])
-            if st.button(f"💻 ({code_remaining})", key="ex_code", help="Random code example"):
+            if st.button(f"ðŸ’» ({code_remaining})", key="ex_code", help="Random code example"):
                 example = get_random_example("code")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "code"}
@@ -351,7 +351,7 @@ def main():
         
         with col2:
             content_remaining = len(EXAMPLE_POOL["content"]) + len(FALLBACK_EXAMPLES["content"]) - len(st.session_state.used_examples["content"])
-            if st.button(f"📚 ({content_remaining})", key="ex_content", help="Random content example"):
+            if st.button(f"ðŸ“š ({content_remaining})", key="ex_content", help="Random content example"):
                 example = get_random_example("content")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "content"}
@@ -359,17 +359,17 @@ def main():
         
         with col3:
             business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(st.session_state.used_examples["business"])
-            if st.button(f"📈 ({business_remaining})", key="ex_business", help="Random business example"):
+            if st.button(f"ðŸ“ˆ ({business_remaining})", key="ex_business", help="Random business example"):
                 example = get_random_example("business")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "business"}
                     st.session_state.show_welcome = False
         
         if any(st.session_state.using_fallback.values()):
-            st.caption("🔄 Using extended pool")
+            st.caption("ðŸ”„ Using extended pool")
     
     # Main content
-    st.title("💬 PeerAgent Chat")
+    st.title("ðŸ’¬ PeerAgent Chat")
     st.markdown("*Your intelligent multi-agent assistant*")
     
     # Show welcome message if no messages yet
@@ -394,7 +394,7 @@ def main():
         
         st.session_state.messages.append({"role": "user", "content": task})
         
-        with st.spinner(f"🔄 Processing with {example_type} agent..."):
+        with st.spinner(f"ðŸ”„ Processing with {example_type} agent..."):
             agent_type_to_use = example_type if agent_mode == "Automatic" else agent_mode.lower()
             result = send_task(task, agent_type_to_use)
         
@@ -410,7 +410,7 @@ def main():
             st.markdown(task)
         
         with st.chat_message("assistant"):
-            with st.spinner("🔄 Processing..."):
+            with st.spinner("ðŸ”„ Processing..."):
                 agent_type = None if agent_mode == "Automatic" else agent_mode.lower()
                 result = send_task(task, agent_type)
             

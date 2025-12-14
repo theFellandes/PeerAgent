@@ -1,6 +1,9 @@
-# Core dependencies
+# PeerAgent Dependencies v2.0
+
+# Core Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
+gunicorn>=21.2.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
@@ -20,6 +23,7 @@ redis>=5.0.0
 
 # Celery for task queue
 celery[redis]>=5.3.0
+flower>=2.0.0  # Celery monitoring
 
 # Search
 duckduckgo-search>=4.0.0
@@ -29,6 +33,7 @@ ddgs>=6.0.0
 httpx>=0.26.0
 python-dotenv>=1.0.0
 slowapi>=0.1.9  # Rate limiting
+websockets>=12.0  # WebSocket support
 
 # Testing
 pytest>=7.4.0
@@ -37,6 +42,15 @@ pytest-cov>=4.1.0
 
 # Type checking
 mypy>=1.8.0
+
+# Code quality
+ruff>=0.1.0
+black>=24.0.0
+isort>=5.13.0
+
+# Security
+bandit>=1.7.0
+safety>=2.3.0
 
 # Streamlit for UI
 streamlit>=1.30.0

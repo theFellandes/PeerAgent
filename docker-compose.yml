@@ -1,15 +1,16 @@
-# Docker Compose for PeerAgent Multi-Agent System
+# Docker Compose for PeerAgent Multi-Agent System v2.0
 # Usage: docker-compose up -d
-# Build with tags: docker-compose build --build-arg VERSION=1.0.0
-
+# Build with tags: docker-compose build --build-arg VERSION=2.0.0
 services:
+  # ==========================================================================
   # FastAPI Application
+  # ==========================================================================
   api:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        VERSION: ${VERSION:-1.0.0}
+        VERSION: ${VERSION:-1.2.0}
     image: peeragent-api:${VERSION:-latest}
     container_name: peeragent-api
     ports:
@@ -24,25 +25,41 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
       - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
-      - mongo
-      - redis
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - peeragent-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
+  # ==========================================================================
   # Celery Worker
+  # ==========================================================================
   worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    container_name: peeragent-worker
+    image: peeragent-worker:${VERSION:-latest}
     environment:
       - MONGODB_URL=mongodb://mongo:27017
       - REDIS_URL=redis://redis:6379/0
@@ -50,15 +67,47 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - LLM_MODEL=${LLM_MODEL:-gpt-4}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - peeragent-network
+    restart: unless-stopped
+    deploy:
+      replicas: 1  # Scale workers
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ==========================================================================
+  # Celery Beat Scheduler (for periodic tasks)
+  # ==========================================================================
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: peeragent-worker:${VERSION:-latest}
+    container_name: peeragent-beat
+    command: celery -A src.worker.celery_app beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
       - redis
     networks:
       - peeragent-network
     restart: unless-stopped
 
+  # ==========================================================================
   # MongoDB Database
+  # ==========================================================================
   mongo:
     image: mongo:7.0
     container_name: peeragent-mongo
@@ -66,6 +115,9 @@ services:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    environment:
+      - MONGO_INITDB_DATABASE=peeragent
     networks:
       - peeragent-network
     restart: unless-stopped
@@ -74,8 +126,16 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
 
+  # ==========================================================================
   # Redis (Message Broker & Cache)
+  # ==========================================================================
   redis:
     image: redis:7-alpine
     container_name: peeragent-redis
@@ -83,6 +143,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     networks:
       - peeragent-network
     restart: unless-stopped
@@ -91,27 +152,74 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
+  # ==========================================================================
   # Streamlit UI
+  # ==========================================================================
   ui:
     build:
       context: .
       dockerfile: Dockerfile.ui
+    image: peeragent-ui:${VERSION:-latest}
     container_name: peeragent-ui
     ports:
       - "8501:8501"
     environment:
       - API_URL=http://api:8000
+      - WS_URL=ws://api:8000
     depends_on:
       - api
     networks:
       - peeragent-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # ==========================================================================
+  # Flower (Celery Monitoring) - Optional
+  # ==========================================================================
+  flower:
+    image: mher/flower:2.0
+    container_name: peeragent-flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
+      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    depends_on:
+      - redis
+    networks:
+      - peeragent-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+# ==========================================================================
+# Networks
+# ==========================================================================
 networks:
   peeragent-network:
     driver: bridge
 
+# ==========================================================================
+# Volumes
+# ==========================================================================
 volumes:
   mongo-data:
+    driver: local
+  mongo-config:
+    driver: local
   redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
