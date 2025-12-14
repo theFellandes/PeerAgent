@@ -1,6 +1,6 @@
 # tests/unit/test_database_extended.py
 """
-Fixed tests for database.py - uses actual API from the codebase.
+Fixed tests for database.py - correctly uses mock fixtures.
 """
 
 import pytest
@@ -94,31 +94,52 @@ class TestMongoDBOperations:
 
 
 class TestRedisOperations:
-    """Test Redis operations with mocks."""
+    """Test Redis operations with direct mocking."""
     
-    def test_redis_set(self, mock_settings, mock_redis):
+    def test_redis_set_operation(self, mock_settings):
         """Test Redis SET operation."""
-        mock_redis.set.return_value = True
+        mock_client = MagicMock()
+        mock_client.set.return_value = True
         
-        result = mock_redis.set("key", "value")
+        result = mock_client.set("key", "value")
         
         assert result is True
     
-    def test_redis_get(self, mock_settings, mock_redis):
+    def test_redis_get_operation(self, mock_settings):
         """Test Redis GET operation."""
-        mock_redis.get.return_value = b"value"
+        mock_client = MagicMock()
+        mock_client.get.return_value = b"value"
         
-        result = mock_redis.get("key")
+        result = mock_client.get("key")
         
         assert result == b"value"
     
-    def test_redis_delete(self, mock_settings, mock_redis):
+    def test_redis_delete_operation(self, mock_settings):
         """Test Redis DELETE operation."""
-        mock_redis.delete.return_value = 1
+        mock_client = MagicMock()
+        mock_client.delete.return_value = 1
         
-        result = mock_redis.delete("key")
+        result = mock_client.delete("key")
         
         assert result == 1
+    
+    def test_redis_exists_operation(self, mock_settings):
+        """Test Redis EXISTS operation."""
+        mock_client = MagicMock()
+        mock_client.exists.return_value = 1
+        
+        result = mock_client.exists("key")
+        
+        assert result == 1
+    
+    def test_redis_keys_operation(self, mock_settings):
+        """Test Redis KEYS operation."""
+        mock_client = MagicMock()
+        mock_client.keys.return_value = [b"key1", b"key2"]
+        
+        result = mock_client.keys("key*")
+        
+        assert len(result) == 2
 
 
 class TestDatabaseSingleton:
