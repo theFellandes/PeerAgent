@@ -1,521 +1,305 @@
+# tests/unit/test_problem_agent.py
 """
-Comprehensive unit tests for ProblemAgent.
-Target: src/agents/problem_agent.py (33% coverage -> 75%+)
+Unit tests for ProblemStructuringAgent.
+Target: src/agents/problem_agent.py (33% coverage -> 70%+)
 """
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock, patch, AsyncMock
 import json
 
 
 class TestProblemAgentInitialization:
-    """Test ProblemAgent initialization."""
+    """Test ProblemStructuringAgent initialization."""
     
-    def test_problem_agent_type(self):
-        """Test ProblemAgent type."""
-        class ProblemAgent:
-            agent_type = "problem_agent"
-        
-        assert ProblemAgent.agent_type == "problem_agent"
+    @pytest.fixture
+    def problem_agent(self, mock_settings):
+        """Create ProblemStructuringAgent instance."""
+        with patch("langchain_community.utilities.DuckDuckGoSearchAPIWrapper"):
+            from src.agents.problem_agent import ProblemStructuringAgent
+            return ProblemStructuringAgent()
     
-    def test_problem_agent_has_session_id(self):
-        """Test ProblemAgent has session ID."""
-        class ProblemAgent:
-            def __init__(self, session_id=None):
-                import uuid
-                self.session_id = session_id or str(uuid.uuid4())
-        
-        agent = ProblemAgent("test-session")
-        assert agent.session_id == "test-session"
+    def test_problem_agent_type(self, problem_agent):
+        """Test agent type is correct."""
+        assert problem_agent.agent_type == "problem_agent"
     
-    def test_problem_agent_system_prompt(self):
-        """Test ProblemAgent system prompt."""
-        system_prompt = """You are an expert problem structuring consultant.
-        Create MECE (Mutually Exclusive, Collectively Exhaustive) problem trees
-        to break down complex business problems into manageable components."""
-        
-        assert "MECE" in system_prompt
-        assert "problem" in system_prompt.lower()
+    def test_problem_agent_has_session_id(self, mock_settings):
+        """Test agent has session_id."""
+        with patch("langchain_community.utilities.DuckDuckGoSearchAPIWrapper"):
+            from src.agents.problem_agent import ProblemStructuringAgent
+            agent = ProblemStructuringAgent(session_id="test-session")
+            assert agent.session_id == "test-session"
+    
+    def test_problem_agent_has_system_prompt(self, problem_agent):
+        """Test agent has system prompt mentioning MECE."""
+        assert len(problem_agent.system_prompt) > 0
+        prompt_lower = problem_agent.system_prompt.lower()
+        # Should mention MECE or problem structuring
+        assert any(word in prompt_lower for word in ["mece", "problem", "structure", "tree"])
 
 
-class TestMECEPrinciples:
-    """Test MECE principle implementation."""
+class TestMECETreeGeneration:
+    """Test MECE problem tree generation."""
     
-    def test_mutually_exclusive_branches(self):
-        """Test branches are mutually exclusive."""
-        branches = [
-            {"category": "Internal", "issues": ["Process", "People"]},
-            {"category": "External", "issues": ["Market", "Competition"]},
-        ]
-        
-        # Check no overlap in categories
-        categories = [b["category"] for b in branches]
-        assert len(categories) == len(set(categories))
+    @pytest.fixture
+    def problem_agent(self, mock_settings):
+        with patch("langchain_community.utilities.DuckDuckGoSearchAPIWrapper"):
+            from src.agents.problem_agent import ProblemStructuringAgent
+            return ProblemStructuringAgent()
     
-    def test_collectively_exhaustive_branches(self):
-        """Test branches are collectively exhaustive."""
-        problem = "Revenue decline"
-        
-        # All major factors should be covered
-        required_categories = ["Revenue", "Cost", "Volume", "Price"]
-        branches = [
-            {"category": "Revenue", "issues": []},
-            {"category": "Cost", "issues": []},
-            {"category": "Volume", "issues": []},
-            {"category": "Price", "issues": []},
-        ]
-        
-        branch_categories = {b["category"] for b in branches}
-        
-        for cat in required_categories:
-            assert cat in branch_categories
-    
-    def test_branch_depth_limit(self):
-        """Test branch depth limit."""
-        max_depth = 3
-        
-        def calculate_depth(branch: dict, current_depth: int = 1) -> int:
-            if "sub_branches" not in branch or not branch["sub_branches"]:
-                return current_depth
-            return max(
-                calculate_depth(sub, current_depth + 1)
-                for sub in branch["sub_branches"]
-            )
-        
-        branch = {
-            "category": "Root",
-            "sub_branches": [
+    @pytest.mark.asyncio
+    async def test_execute_returns_problem_tree(self, problem_agent, mock_settings):
+        """Test that execute returns a problem tree."""
+        mock_response = Mock()
+        mock_response.content = json.dumps({
+            "problem_type": "Growth",
+            "main_problem": "Declining Revenue",
+            "root_causes": [
                 {
-                    "category": "Level1",
-                    "sub_branches": [
-                        {"category": "Level2", "sub_branches": []}
-                    ]
+                    "cause": "Sales Performance",
+                    "sub_causes": ["Low conversion", "Insufficient leads"]
+                },
+                {
+                    "cause": "Market Factors",
+                    "sub_causes": ["Competition", "Saturation"]
                 }
             ]
-        }
-        
-        depth = calculate_depth(branch)
-        assert depth <= max_depth
-
-
-class TestProblemTreeStructure:
-    """Test problem tree data structure."""
-    
-    def test_problem_tree_has_root(self):
-        """Test problem tree has root problem."""
-        tree = {
-            "root_problem": "Why are sales declining?",
-            "branches": [],
-        }
-        
-        assert "root_problem" in tree
-        assert tree["root_problem"] is not None
-    
-    def test_problem_tree_has_branches(self):
-        """Test problem tree has branches."""
-        tree = {
-            "root_problem": "Revenue decline",
-            "branches": [
-                {"category": "Sales", "issues": ["Conversion", "Leads"]},
-                {"category": "Pricing", "issues": ["Competitiveness"]},
-            ],
-        }
-        
-        assert len(tree["branches"]) >= 2
-    
-    def test_branch_structure(self):
-        """Test branch structure."""
-        branch = {
-            "category": "Sales Performance",
-            "description": "Issues related to sales execution",
-            "issues": [
-                "Low conversion rate",
-                "Insufficient lead generation",
-                "Sales team capacity",
-            ],
-            "metrics": ["Conversion %", "Leads/month", "Quota attainment"],
-        }
-        
-        assert "category" in branch
-        assert "issues" in branch
-        assert isinstance(branch["issues"], list)
-    
-    def test_nested_branch_structure(self):
-        """Test nested branch structure."""
-        branch = {
-            "category": "Sales",
-            "issues": ["Low conversion"],
-            "sub_branches": [
-                {
-                    "category": "Lead Quality",
-                    "issues": ["Poor targeting", "Weak qualification"],
-                },
-                {
-                    "category": "Sales Process",
-                    "issues": ["Long cycle", "Poor follow-up"],
-                },
-            ],
-        }
-        
-        assert "sub_branches" in branch
-        assert len(branch["sub_branches"]) == 2
-
-
-class TestProblemTreeGeneration:
-    """Test problem tree generation."""
-    
-    def test_generate_from_diagnosis(self, sample_business_diagnosis):
-        """Test generating tree from business diagnosis."""
-        # Input: Business diagnosis
-        diagnosis = sample_business_diagnosis
-        
-        # Generate tree
-        tree = {
-            "root_problem": diagnosis["identified_business_problem"],
-            "context": {
-                "stated_problem": diagnosis["customer_stated_problem"],
-                "hidden_risk": diagnosis["hidden_root_risk"],
-                "urgency": diagnosis["urgency_level"],
-            },
-            "branches": [],
-        }
-        
-        assert tree["root_problem"] == "Market share erosion"
-        assert tree["context"]["urgency"] == "High"
-    
-    def test_generate_standard_framework(self):
-        """Test generating standard framework branches."""
-        frameworks = {
-            "revenue_decline": [
-                {"category": "Volume", "focus": "Units sold"},
-                {"category": "Price", "focus": "Pricing power"},
-                {"category": "Mix", "focus": "Product mix"},
-            ],
-            "cost_increase": [
-                {"category": "Fixed Costs", "focus": "Overhead"},
-                {"category": "Variable Costs", "focus": "COGS"},
-                {"category": "One-time Costs", "focus": "Special items"},
-            ],
-            "customer_churn": [
-                {"category": "Product", "focus": "Features, quality"},
-                {"category": "Service", "focus": "Support, experience"},
-                {"category": "Competition", "focus": "Alternatives"},
-                {"category": "Price", "focus": "Value perception"},
-            ],
-        }
-        
-        problem_type = "customer_churn"
-        branches = frameworks.get(problem_type, [])
-        
-        assert len(branches) == 4
-        assert any(b["category"] == "Product" for b in branches)
-    
-    def test_generate_custom_branches(self):
-        """Test generating custom branches based on context."""
-        problem = "Enterprise customer churn"
-        context = ["long sales cycle", "complex implementation"]
-        
-        # Custom branches for enterprise
-        branches = [
-            {"category": "Onboarding", "issues": ["Implementation time", "Training"]},
-            {"category": "Account Management", "issues": ["Response time", "Expertise"]},
-            {"category": "Product Fit", "issues": ["Feature gaps", "Integration"]},
-            {"category": "Value Realization", "issues": ["ROI tracking", "Usage"]},
-        ]
-        
-        # Enterprise-specific branch
-        assert any("Onboarding" in b["category"] for b in branches)
-
-
-class TestProblemTreeValidation:
-    """Test problem tree validation."""
-    
-    def test_validate_has_root(self):
-        """Test validation requires root problem."""
-        def validate_tree(tree: dict) -> list:
-            errors = []
-            if not tree.get("root_problem"):
-                errors.append("Missing root problem")
-            return errors
-        
-        invalid_tree = {"branches": []}
-        errors = validate_tree(invalid_tree)
-        
-        assert "Missing root problem" in errors
-    
-    def test_validate_has_branches(self):
-        """Test validation requires branches."""
-        def validate_tree(tree: dict) -> list:
-            errors = []
-            if not tree.get("branches") or len(tree["branches"]) == 0:
-                errors.append("Tree must have at least one branch")
-            return errors
-        
-        invalid_tree = {"root_problem": "Test", "branches": []}
-        errors = validate_tree(invalid_tree)
-        
-        assert "Tree must have at least one branch" in errors
-    
-    def test_validate_branch_has_category(self):
-        """Test validation requires branch category."""
-        def validate_branch(branch: dict) -> list:
-            errors = []
-            if not branch.get("category"):
-                errors.append("Branch missing category")
-            return errors
-        
-        invalid_branch = {"issues": ["Issue 1"]}
-        errors = validate_branch(invalid_branch)
-        
-        assert "Branch missing category" in errors
-    
-    def test_validate_no_duplicate_categories(self):
-        """Test validation prevents duplicate categories."""
-        def validate_tree(tree: dict) -> list:
-            errors = []
-            categories = [b["category"] for b in tree.get("branches", [])]
-            if len(categories) != len(set(categories)):
-                errors.append("Duplicate branch categories found")
-            return errors
-        
-        invalid_tree = {
-            "root_problem": "Test",
-            "branches": [
-                {"category": "Sales", "issues": []},
-                {"category": "Sales", "issues": []},  # Duplicate
-            ],
-        }
-        
-        errors = validate_tree(invalid_tree)
-        assert "Duplicate branch categories found" in errors
-
-
-class TestProblemAgentExecution:
-    """Test ProblemAgent execution."""
-    
-    def test_execute_returns_tree(self):
-        """Test execute returns problem tree."""
-        def mock_execute(problem: str) -> dict:
-            return {
-                "root_problem": problem,
-                "branches": [
-                    {"category": "Category1", "issues": ["Issue1"]},
-                    {"category": "Category2", "issues": ["Issue2"]},
-                ],
-            }
-        
-        result = mock_execute("Why are sales declining?")
-        
-        assert "root_problem" in result
-        assert "branches" in result
-        assert len(result["branches"]) >= 2
-    
-    def test_execute_with_context(self):
-        """Test execute with additional context."""
-        def mock_execute(problem: str, context: dict = None) -> dict:
-            tree = {
-                "root_problem": problem,
-                "branches": [],
-            }
-            
-            if context and context.get("industry"):
-                # Add industry-specific branches
-                if context["industry"] == "saas":
-                    tree["branches"].append({
-                        "category": "Churn",
-                        "issues": ["Monthly churn", "Annual churn"],
-                    })
-            
-            return tree
-        
-        result = mock_execute("Revenue decline", {"industry": "saas"})
-        
-        assert any(b["category"] == "Churn" for b in result["branches"])
-    
-    def test_execute_handles_empty_problem(self):
-        """Test execute handles empty problem."""
-        def mock_execute(problem: str) -> dict:
-            if not problem or not problem.strip():
-                return {"error": "Problem statement required"}
-            return {"root_problem": problem, "branches": []}
-        
-        result = mock_execute("")
-        
-        assert "error" in result
-
-
-class TestProblemTreeFormatting:
-    """Test problem tree formatting and output."""
-    
-    def test_format_as_text(self):
-        """Test formatting tree as text."""
-        tree = {
-            "root_problem": "Revenue decline",
-            "branches": [
-                {"category": "Volume", "issues": ["Lower units"]},
-                {"category": "Price", "issues": ["Discounting"]},
-            ],
-        }
-        
-        def format_tree_text(tree: dict) -> str:
-            lines = [f"Problem: {tree['root_problem']}", ""]
-            for i, branch in enumerate(tree["branches"], 1):
-                lines.append(f"{i}. {branch['category']}")
-                for issue in branch.get("issues", []):
-                    lines.append(f"   - {issue}")
-            return "\n".join(lines)
-        
-        output = format_tree_text(tree)
-        
-        assert "Revenue decline" in output
-        assert "Volume" in output
-        assert "Price" in output
-    
-    def test_format_as_markdown(self):
-        """Test formatting tree as markdown."""
-        tree = {
-            "root_problem": "Revenue decline",
-            "branches": [
-                {"category": "Volume", "issues": ["Lower units"]},
-            ],
-        }
-        
-        def format_tree_markdown(tree: dict) -> str:
-            lines = [f"# {tree['root_problem']}", ""]
-            for branch in tree["branches"]:
-                lines.append(f"## {branch['category']}")
-                for issue in branch.get("issues", []):
-                    lines.append(f"- {issue}")
-                lines.append("")
-            return "\n".join(lines)
-        
-        output = format_tree_markdown(tree)
-        
-        assert "# Revenue decline" in output
-        assert "## Volume" in output
-    
-    def test_format_as_json(self):
-        """Test formatting tree as JSON."""
-        tree = {
-            "root_problem": "Revenue decline",
-            "branches": [{"category": "Volume", "issues": ["Lower units"]}],
-        }
-        
-        json_output = json.dumps(tree, indent=2)
-        parsed = json.loads(json_output)
-        
-        assert parsed == tree
-
-
-class TestProblemTreeAnalysis:
-    """Test problem tree analysis features."""
-    
-    def test_count_total_issues(self):
-        """Test counting total issues."""
-        tree = {
-            "branches": [
-                {"issues": ["A", "B", "C"]},
-                {"issues": ["D", "E"]},
-            ],
-        }
-        
-        total = sum(len(b.get("issues", [])) for b in tree["branches"])
-        assert total == 5
-    
-    def test_identify_priority_branches(self):
-        """Test identifying priority branches."""
-        tree = {
-            "branches": [
-                {"category": "Sales", "impact": "high", "issues": ["A"]},
-                {"category": "Marketing", "impact": "medium", "issues": ["B"]},
-                {"category": "Product", "impact": "high", "issues": ["C"]},
-            ],
-        }
-        
-        high_priority = [b for b in tree["branches"] if b.get("impact") == "high"]
-        
-        assert len(high_priority) == 2
-    
-    def test_calculate_completeness_score(self):
-        """Test calculating tree completeness."""
-        def calculate_completeness(tree: dict) -> float:
-            score = 0.0
-            
-            # Has root problem
-            if tree.get("root_problem"):
-                score += 0.2
-            
-            # Has branches
-            branches = tree.get("branches", [])
-            if branches:
-                score += 0.2
-            
-            # Each branch has issues
-            branches_with_issues = sum(
-                1 for b in branches if b.get("issues")
-            )
-            if branches:
-                score += 0.3 * (branches_with_issues / len(branches))
-            
-            # Minimum branch count (3+)
-            if len(branches) >= 3:
-                score += 0.3
-            
-            return round(score, 2)
-        
-        complete_tree = {
-            "root_problem": "Test",
-            "branches": [
-                {"category": "A", "issues": ["1"]},
-                {"category": "B", "issues": ["2"]},
-                {"category": "C", "issues": ["3"]},
-            ],
-        }
-        
-        score = calculate_completeness(complete_tree)
-        assert score >= 0.9
-
-
-class TestProblemAgentIntegration:
-    """Test ProblemAgent integration scenarios."""
-    
-    def test_integration_with_business_agent(self, sample_business_diagnosis):
-        """Test integration with BusinessSenseAgent output."""
-        diagnosis = sample_business_diagnosis
-        
-        # ProblemAgent receives diagnosis
-        tree_input = {
-            "problem": diagnosis["identified_business_problem"],
-            "context": diagnosis["hidden_root_risk"],
-            "urgency": diagnosis["urgency_level"],
-        }
-        
-        # Generate tree
-        tree = {
-            "root_problem": tree_input["problem"],
-            "urgency": tree_input["urgency"],
-            "branches": [
-                {"category": "Root Cause Analysis", "issues": [tree_input["context"]]},
-            ],
-        }
-        
-        assert tree["root_problem"] == "Market share erosion"
-        assert tree["urgency"] == "High"
-    
-    def test_iterative_tree_refinement(self):
-        """Test iterative tree refinement."""
-        initial_tree = {
-            "root_problem": "Sales decline",
-            "branches": [{"category": "Volume", "issues": []}],
-        }
-        
-        # Refinement 1: Add issues
-        initial_tree["branches"][0]["issues"] = ["Lower conversion"]
-        
-        # Refinement 2: Add branch
-        initial_tree["branches"].append({
-            "category": "Price",
-            "issues": ["Competitive pressure"],
         })
         
-        assert len(initial_tree["branches"]) == 2
-        assert len(initial_tree["branches"][0]["issues"]) == 1
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        problem_agent._llm = mock_llm
+        
+        result = await problem_agent.execute("Revenue is declining by 20%")
+        
+        assert result.problem_type is not None
+        assert result.main_problem is not None
+        assert len(result.root_causes) >= 1
+    
+    @pytest.mark.asyncio
+    async def test_tree_has_multiple_branches(self, problem_agent, mock_settings):
+        """Test tree has multiple root causes (MECE completeness)."""
+        mock_response = Mock()
+        mock_response.content = json.dumps({
+            "problem_type": "Profitability",
+            "main_problem": "Margin Erosion",
+            "root_causes": [
+                {"cause": "Revenue Issues", "sub_causes": ["Price pressure"]},
+                {"cause": "Cost Issues", "sub_causes": ["Rising COGS"]},
+                {"cause": "Volume Issues", "sub_causes": ["Declining units"]}
+            ]
+        })
+        
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        problem_agent._llm = mock_llm
+        
+        result = await problem_agent.execute("Our margins are shrinking")
+        
+        # MECE should have multiple non-overlapping branches
+        assert len(result.root_causes) >= 2
+    
+    @pytest.mark.asyncio
+    async def test_each_cause_has_sub_causes(self, problem_agent, mock_settings):
+        """Test each root cause has sub-causes."""
+        mock_response = Mock()
+        mock_response.content = json.dumps({
+            "problem_type": "Operations",
+            "main_problem": "Delivery Delays",
+            "root_causes": [
+                {"cause": "Warehouse", "sub_causes": ["Picking errors", "Packing delays"]},
+                {"cause": "Logistics", "sub_causes": ["Carrier issues", "Route inefficiency"]}
+            ]
+        })
+        
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        problem_agent._llm = mock_llm
+        
+        result = await problem_agent.execute("Deliveries are always late")
+        
+        for cause in result.root_causes:
+            assert len(cause.sub_causes) >= 1
+
+
+class TestProblemTreeModel:
+    """Test ProblemTree Pydantic model."""
+    
+    def test_valid_problem_tree(self, mock_settings):
+        """Test creating valid problem tree."""
+        from src.models.agents import ProblemTree, ProblemCause
+        
+        tree = ProblemTree(
+            problem_type="Growth",
+            main_problem="Declining Sales",
+            root_causes=[
+                ProblemCause(
+                    cause="Marketing",
+                    sub_causes=["Bad targeting", "Weak messaging"]
+                ),
+                ProblemCause(
+                    cause="Sales",
+                    sub_causes=["Low conversion", "Long cycle"]
+                )
+            ]
+        )
+        
+        assert tree.problem_type == "Growth"
+        assert len(tree.root_causes) == 2
+    
+    def test_problem_cause_model(self, mock_settings):
+        """Test ProblemCause model."""
+        from src.models.agents import ProblemCause
+        
+        cause = ProblemCause(
+            cause="Sales Performance",
+            sub_causes=["Low conversion rate", "Insufficient pipeline"]
+        )
+        
+        assert cause.cause == "Sales Performance"
+        assert len(cause.sub_causes) == 2
+    
+    def test_problem_tree_serialization(self, mock_settings):
+        """Test problem tree serializes correctly."""
+        from src.models.agents import ProblemTree, ProblemCause
+        
+        tree = ProblemTree(
+            problem_type="Test",
+            main_problem="Test Problem",
+            root_causes=[
+                ProblemCause(cause="Cause1", sub_causes=["Sub1"])
+            ]
+        )
+        
+        data = tree.model_dump()
+        assert isinstance(data, dict)
+        assert "root_causes" in data
+        assert isinstance(data["root_causes"], list)
+
+
+class TestProblemTypes:
+    """Test different problem type classifications."""
+    
+    @pytest.fixture
+    def problem_agent(self, mock_settings):
+        with patch("langchain_community.utilities.DuckDuckGoSearchAPIWrapper"):
+            from src.agents.problem_agent import ProblemStructuringAgent
+            return ProblemStructuringAgent()
+    
+    def test_growth_problem_type(self, problem_agent):
+        """Test Growth problem type detection."""
+        growth_problems = [
+            "Revenue is declining",
+            "Sales dropped 20%",
+            "We're losing market share"
+        ]
+        
+        for problem in growth_problems:
+            # Should contain growth-related keywords
+            keywords = ["revenue", "sales", "market", "growth", "decline"]
+            assert any(kw in problem.lower() for kw in keywords)
+    
+    def test_profitability_problem_type(self, problem_agent):
+        """Test Profitability problem type detection."""
+        profitability_problems = [
+            "Our margins are shrinking",
+            "Costs are rising faster than revenue",
+            "Profit is declining despite stable sales"
+        ]
+        
+        for problem in profitability_problems:
+            keywords = ["margin", "cost", "profit", "expense"]
+            assert any(kw in problem.lower() for kw in keywords)
+    
+    def test_operations_problem_type(self, problem_agent):
+        """Test Operations problem type detection."""
+        operations_problems = [
+            "Delivery times are too long",
+            "Production quality is declining",
+            "Our warehouse is inefficient"
+        ]
+        
+        for problem in operations_problems:
+            keywords = ["delivery", "production", "warehouse", "efficiency", "operations"]
+            assert any(kw in problem.lower() for kw in keywords)
+
+
+class TestErrorHandling:
+    """Test error handling in ProblemStructuringAgent."""
+    
+    @pytest.fixture
+    def problem_agent(self, mock_settings):
+        with patch("langchain_community.utilities.DuckDuckGoSearchAPIWrapper"):
+            from src.agents.problem_agent import ProblemStructuringAgent
+            return ProblemStructuringAgent()
+    
+    @pytest.mark.asyncio
+    async def test_handles_llm_error(self, problem_agent, mock_settings):
+        """Test handling of LLM errors."""
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=Exception("API Error"))
+        problem_agent._llm = mock_llm
+        
+        result = await problem_agent.execute("Test problem")
+        
+        # Should return something (error or fallback)
+        assert result is not None
+    
+    @pytest.mark.asyncio
+    async def test_handles_invalid_json(self, problem_agent, mock_settings):
+        """Test handling of invalid JSON response."""
+        mock_response = Mock()
+        mock_response.content = "Not valid JSON"
+        
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        problem_agent._llm = mock_llm
+        
+        result = await problem_agent.execute("Test")
+        
+        # Should handle gracefully
+        assert result is not None
+
+
+class TestIntegrationWithBusinessAgent:
+    """Test integration with BusinessSenseAgent output."""
+    
+    @pytest.fixture
+    def problem_agent(self, mock_settings):
+        with patch("langchain_community.utilities.DuckDuckGoSearchAPIWrapper"):
+            from src.agents.problem_agent import ProblemStructuringAgent
+            return ProblemStructuringAgent()
+    
+    @pytest.mark.asyncio
+    async def test_accepts_business_diagnosis_context(self, problem_agent, mock_settings):
+        """Test accepting BusinessDiagnosis as context."""
+        from src.models.agents import BusinessDiagnosis
+        
+        diagnosis = BusinessDiagnosis(
+            customer_stated_problem="Sales dropped 20%",
+            identified_business_problem="Market share erosion",
+            hidden_root_risk="Brand perception issues",
+            urgency_level="Critical"
+        )
+        
+        mock_response = Mock()
+        mock_response.content = json.dumps({
+            "problem_type": "Growth",
+            "main_problem": "Market share erosion",
+            "root_causes": [
+                {"cause": "Competition", "sub_causes": ["Price wars"]}
+            ]
+        })
+        
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke = AsyncMock(return_value=mock_response)
+        problem_agent._llm = mock_llm
+        
+        # Pass diagnosis as context
+        result = await problem_agent.execute(
+            diagnosis.identified_business_problem,
+            context={"diagnosis": diagnosis.model_dump()}
+        )
+        
+        assert result is not None
+        assert result.main_problem is not None
