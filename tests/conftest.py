@@ -12,6 +12,7 @@ import pytest
 import asyncio
 import sys
 import json
+import os
 from typing import Generator, AsyncGenerator, Dict, Any, List
 from unittest.mock import Mock, MagicMock, patch, AsyncMock
 
@@ -19,6 +20,34 @@ from unittest.mock import Mock, MagicMock, patch, AsyncMock
 # =============================================================================
 # CRITICAL: Patch ddgs before any imports
 # =============================================================================
+
+@pytest.fixture
+def env_override():
+    """Context manager for overriding environment variables."""
+    original = os.environ.copy()
+
+    def override(**kwargs):
+        for key, value in kwargs.items():
+            os.environ[key] = str(value)
+
+    yield override
+
+    # Restore original environment
+    os.environ.clear()
+    os.environ.update(original)
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger for testing logging functionality."""
+    mock_log = MagicMock()
+    mock_log.debug = MagicMock()
+    mock_log.info = MagicMock()
+    mock_log.warning = MagicMock()
+    mock_log.error = MagicMock()
+    mock_log.critical = MagicMock()
+    return mock_log
+
 
 @pytest.fixture(scope="session", autouse=True)
 def patch_ddgs_globally():
