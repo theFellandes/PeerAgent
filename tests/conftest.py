@@ -1,13 +1,37 @@
-# Pytest configuration and fixtures
+# Fixed conftest.py - REPLACE your existing tests/conftest.py with this
 """
-Shared fixtures for all tests.
-Provides mock settings, mock LLMs, and test utilities.
+Complete fixtures for PeerAgent tests.
+Includes fixes for:
+- MockWebSocket class
+- mock_mongodb fixture  
+- Proper Redis mock return values
+- ddgs patching
 """
 
 import pytest
 import asyncio
-from typing import Generator, AsyncGenerator, Dict, Any
-from unittest.mock import Mock, patch, AsyncMock
+import sys
+import json
+from typing import Generator, AsyncGenerator, Dict, Any, List
+from unittest.mock import Mock, MagicMock, patch, AsyncMock
+
+
+# =============================================================================
+# CRITICAL: Patch ddgs before any imports
+# =============================================================================
+
+@pytest.fixture(scope="session", autouse=True)
+def patch_ddgs_globally():
+    """Patches ddgs module to prevent ImportError in ContentAgent."""
+    mock_ddgs_module = MagicMock()
+    mock_ddgs_class = MagicMock()
+    mock_ddgs_class.return_value.text = MagicMock(return_value=[
+        {"title": "Result 1", "href": "https://example.com/1", "body": "Body 1"},
+        {"title": "Result 2", "href": "https://example.com/2", "body": "Body 2"},
+    ])
+    mock_ddgs_module.DDGS = mock_ddgs_class
+    sys.modules["ddgs"] = mock_ddgs_module
+    yield
 
 
 # =============================================================================
@@ -20,6 +44,63 @@ def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
+
+# =============================================================================
+# MockWebSocket Class - EXPORTED FOR IMPORTS
+# =============================================================================
+
+class MockWebSocket:
+    """Mock WebSocket for testing WebSocket endpoints."""
+    
+    def __init__(self, session_id: str = "test-session"):
+        self.session_id = session_id
+        self.accepted = False
+        self.closed = False
+        self.close_code = None
+        self.sent_messages: List[dict] = []
+        self.received_messages: List[dict] = []
+        self._receive_queue: List[dict] = []
+    
+    async def accept(self):
+        """Accept the WebSocket connection."""
+        self.accepted = True
+    
+    async def close(self, code: int = 1000):
+        """Close the WebSocket connection."""
+        self.closed = True
+        self.close_code = code
+    
+    async def send_text(self, data: str):
+        """Send text message."""
+        self.sent_messages.append({"type": "text", "data": data})
+    
+    async def send_json(self, data: dict):
+        """Send JSON message."""
+        self.sent_messages.append({"type": "json", "data": data})
+    
+    async def receive_text(self) -> str:
+        """Receive text message."""
+        if self._receive_queue:
+            msg = self._receive_queue.pop(0)
+            return json.dumps(msg) if isinstance(msg, dict) else msg
+        return "{}"
+    
+    async def receive_json(self) -> dict:
+        """Receive JSON message."""
+        if self._receive_queue:
+            return self._receive_queue.pop(0)
+        return {}
+    
+    def queue_message(self, message: dict):
+        """Queue a message to be received."""
+        self._receive_queue.append(message)
+
+
+@pytest.fixture
+def mock_websocket():
+    """Create a MockWebSocket instance."""
+    return MockWebSocket()
 
 
 # =============================================================================
@@ -127,8 +208,23 @@ def mock_business_questions_response():
     return mock_response
 
 
+@pytest.fixture
+def mock_search_wrapper():
+    """Mock DuckDuckGo search wrapper."""
+    mock = MagicMock()
+    mock.run.return_value = json.dumps([
+        {"title": "Result 1", "link": "https://example.com/1", "snippet": "Test snippet 1"},
+        {"title": "Result 2", "link": "https://example.com/2", "snippet": "Test snippet 2"},
+    ])
+    mock.results.return_value = [
+        {"title": "Result 1", "link": "https://example.com/1", "snippet": "Test snippet 1"},
+        {"title": "Result 2", "link": "https://example.com/2", "snippet": "Test snippet 2"},
+    ]
+    return mock
+
+
 # =============================================================================
-# Database Mock Fixtures
+# Database Mock Fixtures - FIXED
 # =============================================================================
 
 @pytest.fixture
@@ -148,22 +244,85 @@ def mock_mongo_db():
             ))
         ))
         mock_collection.find_one = AsyncMock(return_value=None)
+        mock_collection.update_one = AsyncMock(return_value=Mock(modified_count=1))
+        mock_collection.delete_one = AsyncMock(return_value=Mock(deleted_count=1))
+        mock_collection.count_documents = AsyncMock(return_value=0)
         mock_db.__getitem__ = Mock(return_value=mock_collection)
         mock.return_value = mock_db
         yield mock_db
 
 
 @pytest.fixture
+def mock_mongodb():
+    """Mock MongoDB client - alias for compatibility."""
+    with patch("src.utils.database.get_mongo_db") as mock:
+        mock_db = MagicMock()
+        mock_collection = MagicMock()
+        
+        # Configure collection methods
+        mock_collection.insert_one.return_value = Mock(inserted_id="test-id")
+        mock_collection.find_one.return_value = {"_id": "test-id", "data": "test"}
+        mock_collection.find.return_value = MagicMock(
+            sort=MagicMock(return_value=MagicMock(
+                limit=MagicMock(return_value=[])
+            ))
+        )
+        mock_collection.update_one.return_value = Mock(modified_count=1)
+        mock_collection.delete_one.return_value = Mock(deleted_count=1)
+        mock_collection.count_documents.return_value = 0
+        
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+        mock_db.list_collection_names.return_value = ["tasks", "logs"]
+        mock_db.command.return_value = {"ok": 1}
+        
+        mock.return_value = mock_db
+        yield mock_db
+
+
+@pytest.fixture
 def mock_redis():
-    """Mock Redis client."""
+    """Mock Redis client with PROPER return values."""
     with patch("src.utils.database.get_redis_client") as mock:
-        mock_redis = Mock()
-        mock_redis.get = Mock(return_value=None)
-        mock_redis.set = Mock(return_value=True)
-        mock_redis.setex = Mock(return_value=True)
-        mock_redis.delete = Mock(return_value=1)
-        mock_redis.exists = Mock(return_value=0)
-        mock_redis.ping = Mock(return_value=True)
+        mock_redis = MagicMock()
+        
+        # Storage for simulating Redis
+        _storage = {}
+        
+        def mock_get(key):
+            return _storage.get(key)
+        
+        def mock_set(key, value, *args, **kwargs):
+            _storage[key] = value.encode() if isinstance(value, str) else value
+            return True
+        
+        def mock_setex(key, ttl, value):
+            _storage[key] = value.encode() if isinstance(value, str) else value
+            return True
+        
+        def mock_delete(key):
+            if key in _storage:
+                del _storage[key]
+                return 1
+            return 0
+        
+        def mock_exists(key):
+            return 1 if key in _storage else 0
+        
+        def mock_keys(pattern):
+            import fnmatch
+            pattern = pattern.replace("*", ".*")
+            return [k.encode() for k in _storage.keys()]
+        
+        mock_redis.get = MagicMock(side_effect=mock_get)
+        mock_redis.set = MagicMock(side_effect=mock_set)
+        mock_redis.setex = MagicMock(side_effect=mock_setex)
+        mock_redis.delete = MagicMock(side_effect=mock_delete)
+        mock_redis.exists = MagicMock(side_effect=mock_exists)
+        mock_redis.keys = MagicMock(side_effect=mock_keys)
+        mock_redis.ping = MagicMock(return_value=True)
+        mock_redis.scan_iter = MagicMock(return_value=iter([]))
+        mock_redis._storage = _storage  # Expose for test setup
+        
         mock.return_value = mock_redis
         yield mock_redis
 
@@ -207,7 +366,7 @@ def mock_peer_agent():
 
 
 # =============================================================================
-# Sample Data Fixtures
+# Sample Data Fixtures - FIXED FOR PYDANTIC MODELS
 # =============================================================================
 
 @pytest.fixture
@@ -264,7 +423,7 @@ def sample_content_output():
 
 @pytest.fixture
 def sample_business_diagnosis():
-    """Sample BusinessSenseAgent diagnosis."""
+    """Sample BusinessSenseAgent diagnosis - returns Pydantic model."""
     from src.models.agents import BusinessDiagnosis
     return BusinessDiagnosis(
         customer_stated_problem="Sales dropped 20% this quarter",
@@ -276,7 +435,7 @@ def sample_business_diagnosis():
 
 @pytest.fixture
 def sample_problem_tree():
-    """Sample ProblemStructuringAgent output."""
+    """Sample ProblemStructuringAgent output - returns Pydantic model."""
     from src.models.agents import ProblemTree, ProblemCause
     return ProblemTree(
         problem_type="Growth",
@@ -296,8 +455,6 @@ def sample_problem_tree():
             )
         ]
     )
-
-
 
 
 # =============================================================================
