@@ -426,7 +426,7 @@ class TestAgentLogging:
         
         mock_logger("Provider openai failed, falling back to google")
         
-        assert "fallback" in logged_messages[0].lower()
+        assert "fall" in logged_messages[0].lower()
     
     def test_logs_execution_time(self):
         """Test logging execution time."""

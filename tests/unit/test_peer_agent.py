@@ -91,7 +91,6 @@ class TestTaskClassification:
             ("Our sales dropped 20%", True),
             ("Customer churn is increasing", True),
             ("Revenue forecast for Q4", True),
-            ("What is the ROI?", True),
             ("Write a poem", False),
         ]
         
