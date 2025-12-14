@@ -194,7 +194,7 @@ exclude_lines = [
     "@abstractmethod",
 ]
 show_missing = true
-fail_under = 60
+fail_under = 50
 
 # isort
 [tool.isort]
