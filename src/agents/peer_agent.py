@@ -247,10 +247,14 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
                 task_id=state.get("task_id"),
                 chat_history=chat_history
             )
+            # Business agent returns {"type": "questions"/"diagnosis", "data": ...}
+            data = result.get("data")
+            data_dict = data.model_dump() if hasattr(data, 'model_dump') else data
             return {
                 "agent_result": {
                     "agent_type": "business_sense_agent",
-                    "data": result.get("data").model_dump() if hasattr(result.get("data"), 'model_dump') else result
+                    "type": result.get("type"),
+                    "data": data_dict
                 },
                 "messages": [AIMessage(content=f"Business analysis: {result.get('type')}")]
             }
@@ -414,12 +418,15 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
                 result = await self.business_agent.execute(
                     task, session_id=session_id, task_id=task_id, chat_history=chat_history
                 )
+                # Business agent returns {"type": "questions"/"diagnosis", "data": ...}
                 data = result.get("data")
+                data_dict = data.model_dump() if hasattr(data, 'model_dump') else data
                 if session_id:
                     memory.add_interaction(session_id, task, str(result)[:500])
                 return {
                     "agent_type": "business_sense_agent",
-                    "data": data.model_dump() if hasattr(data, 'model_dump') else data
+                    "type": result.get("type"),
+                    "data": data_dict
                 }
             else:
                 raise ValueError(f"Unknown agent type: {agent_type}")

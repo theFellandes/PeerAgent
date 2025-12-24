@@ -88,6 +88,10 @@ class BusinessAgentState(TypedDict):
     iterations: int                        # Prevent infinite loops
 ```
 
+### Example Flow
+
+![img.png](graphs/img.png)
+
 ### Workflow Graph
 
 ![FastAPI Agent Routing-2025-12-13-094840.png](graphs/FastAPI%20Agent%20Routing-2025-12-13-094840.png)

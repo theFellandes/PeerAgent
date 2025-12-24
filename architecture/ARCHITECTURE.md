@@ -19,6 +19,56 @@ PeerAgent is a multi-agent AI system that intelligently routes tasks to speciali
 
 ![FastAPI Agent Routing-2025-12-13-094311.png](graphs/FastAPI%20Agent%20Routing-2025-12-13-094311.png)
 
+### Flow Summary
+
+```
+User Request: "Write a Python function to read a file"
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. API Layer (FastAPI)                                          │
+│    • Validate request (Pydantic: TaskExecuteRequest)            │
+│    • Generate task_id, session_id                               │
+│    • Store initial state in task_store                          │
+│    • Rate limit check (10/min)                                  │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. PeerAgent Orchestration                                      │
+│    • Load chat history from MemoryStore                         │
+│    • Initialize PeerAgentState with messages                    │
+│    • Invoke LangGraph                                           │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. Classification Node                                          │
+│    • _keyword_classify("...python...code...")                   │
+│    • Scores: {code: 3, content: 0, business: 0}                 │
+│    • Result: "code" (keyword match, no LLM needed)              │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Route to CodeAgent                                           │
+│    • Detect language: "python"                                  │
+│    • Build messages with chat history                           │
+│    • Invoke LLM with system prompt + user request               │
+│    • Extract code from markdown blocks                          │
+│    • Return CodeOutput(code, language, explanation)             │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. Response Processing                                          │
+│    • Store interaction in MemoryStore                           │
+│    • Log to MongoDB (via MongoDBLogger)                         │
+│    • Update task_store with result                              │
+│    • Return TaskResponse to client                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## Component Architecture

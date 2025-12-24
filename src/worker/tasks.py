@@ -76,7 +76,10 @@ def execute_agent_task(
             "completed_at": datetime.utcnow().isoformat()
         }
 
-
+# TODO: Maybe add task prioritization, e.g., high, medium, low to Celery queues
+# Justification: "In a real consulting scenario, a client asking 'Our sales dropped 20% - help diagnose'
+# is more urgent than 'What is machine learning?' Priority queuing ensures business-critical
+# workflows aren't blocked by informational queries."
 @celery_app.task(bind=True, name="execute_business_task")
 def execute_business_task(
     self,
