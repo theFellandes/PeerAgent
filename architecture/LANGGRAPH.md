@@ -92,6 +92,9 @@ class BusinessAgentState(TypedDict):
 
 ![img.png](graphs/img.png)
 
+### Example Fail Case
+![img2.png](graphs/img2.png)
+
 ### Workflow Graph
 
 ![FastAPI Agent Routing-2025-12-13-094840.png](graphs/FastAPI%20Agent%20Routing-2025-12-13-094840.png)

@@ -138,6 +138,10 @@ class BusinessAgentQuestions(BaseModel):
     session_id: str = Field(..., description="Session ID for tracking the conversation")
     questions: List[str] = Field(..., description="List of clarifying questions")
     category: str = Field(..., description="Category of questions being asked")
+    phase: Optional[str] = Field(default=None, description="Current phase: identify, clarify, or diagnose")
+    phase_emoji: Optional[str] = Field(default=None, description="Emoji indicator for the phase")
+    round_number: Optional[int] = Field(default=None, description="Current questioning round (1, 2, 3...)")
+    feedback: Optional[str] = Field(default=None, description="Feedback message if answer validation failed")
     
     model_config = {
         "json_schema_extra": {
@@ -149,7 +153,11 @@ class BusinessAgentQuestions(BaseModel):
                         "What percentage drop have you seen?",
                         "Is this problem in your company's TOP 3 priorities?"
                     ],
-                    "category": "problem_identification"
+                    "category": "problem_identification",
+                    "phase": "identify",
+                    "phase_emoji": "🔍",
+                    "round_number": 1,
+                    "feedback": None
                 }
             ]
         }
