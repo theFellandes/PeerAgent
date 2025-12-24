@@ -97,7 +97,91 @@ FALLBACK_EXAMPLES = {
         "Analyze factors that lead to startup failure",
         "What causes low employee engagement?",
         "How to identify market opportunities?",
-    ]
+    ],
+}
+
+# Business Demo Scenarios - Complete Q&A flows for demonstration
+BUSINESS_DEMOS = {
+    "Our customer acquisition cost increased 40% this year, help diagnose why": {
+        "rounds": [
+            {
+                "phase": "identify",
+                "phase_emoji": "🔍",
+                "questions": [
+                    "When did you first notice the CAC increase? Was it gradual or sudden?",
+                    "What specific channels saw the biggest cost increases?",
+                    "Is reducing CAC currently one of your company's top 3 priorities?"
+                ],
+                "answer": "We noticed it starting in Q2 when our paid ads stopped performing. Google Ads CPC went up 60%, Facebook ads conversion dropped to half. It's our CFO's #1 priority - we're burning through our runway twice as fast."
+            },
+            {
+                "phase": "clarify",
+                "phase_emoji": "🎯",
+                "questions": [
+                    "Who is most affected by this CAC increase - sales, marketing, or finance?",
+                    "What happens if CAC stays this high for the next 6 months?",
+                    "Have you tried any changes to reduce CAC? What were the results?"
+                ],
+                "answer": "Marketing is blamed but it's affecting everyone. Sales has fewer leads to work with. At this rate, we'll need to raise in 8 months instead of 14. We tried new ad creatives and different audiences - spent $50K on tests but nothing worked."
+            },
+            {
+                "phase": "diagnose",
+                "phase_emoji": "🔬",
+                "questions": [
+                    "Do you need a solution or first need visibility into what's causing the increase?",
+                    "What data are you tracking about your customer journey?",
+                    "What would success look like - what target CAC would work for your business?"
+                ],
+                "answer": "Visibility first - we don't actually know WHY it increased. We track ad spend and signups but nothing in between. No idea which landing pages convert or where people drop off. Success would be getting CAC back to $120 from current $168."
+            }
+        ],
+        "diagnosis": {
+            "customer_stated_problem": "Customer acquisition cost increased 40% this year",
+            "identified_business_problem": "Complete lack of attribution and funnel tracking makes it impossible to diagnose where customers are dropping off or which channels truly perform. The team is making optimization decisions blind.",
+            "hidden_root_risk": "Without proper attribution, each 'optimization' attempt is essentially random. The $50K spent on tests produced no learnings because there's no way to measure what actually worked. This pattern will repeat, burning more runway.",
+            "urgency_level": "Critical"
+        }
+    },
+    "Our product launch failed to meet targets by 30%": {
+        "rounds": [
+            {
+                "phase": "identify",
+                "phase_emoji": "🔍", 
+                "questions": [
+                    "When did you realize the launch wasn't meeting targets?",
+                    "What were the specific targets vs actual results?",
+                    "Is this launch failure currently a top priority for leadership?"
+                ],
+                "answer": "We knew on launch day - first hour numbers were 50% below expectations. Target was 10,000 units first week, we hit 7,000. Revenue gap of $450K. It's all the CEO talks about now."
+            },
+            {
+                "phase": "clarify",
+                "phase_emoji": "🎯",
+                "questions": [
+                    "Who is most impacted by the launch shortfall?",
+                    "What happens if this pattern repeats for the next launch?",
+                    "What marketing strategies did you try that didn't work?"
+                ],
+                "answer": "Sales team is demoralized, marketing got blamed publicly. If this repeats, we lose board confidence - they already questioned our go-to-market. We spent $100K on influencer marketing but couldn't track any conversions from it."
+            },
+            {
+                "phase": "diagnose",
+                "phase_emoji": "🔬",
+                "questions": [
+                    "Do you need a solution or first visibility into what went wrong?",
+                    "What data do you track about pre-launch engagement?",
+                    "What would a successful launch look like next time?"
+                ],
+                "answer": "Visibility first - honestly we don't know WHY it failed. We track impressions and final sales, nothing in between. Success = 15,000 units and knowing exactly what drove each sale."
+            }
+        ],
+        "diagnosis": {
+            "customer_stated_problem": "Product launch missed targets by 30%",
+            "identified_business_problem": "No attribution or conversion tracking between marketing spend and sales. The $100K influencer campaign has no measurable ROI. Decisions are made on assumptions, not data.",
+            "hidden_root_risk": "Without launch retrospectives backed by data, the team will repeat the same patterns. Board confidence erodes with each failed launch. Marketing and Sales blame each other without evidence.",
+            "urgency_level": "Critical"
+        }
+    }
 }
 
 # Page configuration
@@ -198,7 +282,10 @@ def get_random_example(category: str) -> Optional[str]:
 
 
 def send_task(task: str, agent_type: Optional[str] = None) -> dict:
-    """Send a task to the API and get direct result."""
+    """Send a task to the API and get direct result.
+    
+    The API now returns result directly in response body.
+    """
     try:
         if agent_type:
             endpoint = f"{API_URL}/v1/agent/execute/direct/{agent_type}"
@@ -213,20 +300,9 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
         response.raise_for_status()
         result = response.json()
         
-        # Get the task status to retrieve result
-        task_id = result.get("task_id")
-        if task_id:
-            status_response = requests.get(
-                f"{API_URL}/v1/agent/status/{task_id}", 
-                timeout=30
-            )
-            if status_response.status_code == 200:
-                return status_response.json()
-            else:
-                # Return error if task not found
-                return {"error": f"Task status check failed: {status_response.status_code}"}
-        
+        # API now returns result directly - no need to poll
         return result
+        
     except requests.exceptions.ConnectionError:
         return {"error": "Could not connect to API. Make sure the server is running."}
     except requests.exceptions.Timeout:
@@ -282,6 +358,73 @@ def send_business_continuation(
     except Exception as e:
         return {"error": str(e)}
 
+
+def render_business_demo(task: str) -> Optional[dict]:
+    """Render a complete business demo with simulated Q&A flow.
+    
+    This shows the full Socratic questioning process without requiring
+    actual user input - great for demonstrations.
+    """
+    if task not in BUSINESS_DEMOS:
+        return None
+    
+    demo = BUSINESS_DEMOS[task]
+    
+    # Display the problem statement
+    st.markdown(f"### 📋 Problem Statement")
+    st.info(f"**{task}**")
+    st.markdown("---")
+    st.markdown("*Below is a demonstration of how the Socratic questioning process works:*")
+    st.markdown("")
+    
+    # Display each round
+    for i, round_data in enumerate(demo["rounds"], 1):
+        phase = round_data["phase"]
+        emoji = round_data["phase_emoji"]
+        questions = round_data["questions"]
+        answer = round_data["answer"]
+        
+        phase_titles = {
+            "identify": "Problem Identification",
+            "clarify": "Scope & Urgency", 
+            "diagnose": "Root Cause Discovery"
+        }
+        phase_title = phase_titles.get(phase, phase)
+        
+        # Questions section
+        st.markdown(f"### {emoji} Phase {i}: {phase_title}")
+        st.markdown("**Agent asks:**")
+        for j, q in enumerate(questions, 1):
+            st.markdown(f"  {j}. *{q}*")
+        
+        # Answer section
+        st.markdown("")
+        st.markdown("**User responds:**")
+        st.success(f"💬 \"{answer}\"")
+        st.markdown("")
+    
+    # Display diagnosis
+    st.markdown("---")
+    diagnosis = demo["diagnosis"]
+    st.markdown("### 📊 Business Diagnosis Complete")
+    st.markdown(f"**Customer Stated Problem:** {diagnosis['customer_stated_problem']}")
+    st.markdown(f"**Identified Business Problem:** {diagnosis['identified_business_problem']}")
+    st.markdown(f"**Hidden Root Risk:** {diagnosis['hidden_root_risk']}")
+    urgency = diagnosis.get("urgency_level", "Medium")
+    urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
+    st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
+    
+    # Return a formatted result for the messages
+    return {
+        "agent_type": "business_sense_agent",
+        "demo_mode": True,
+        "result": {
+            "type": "demo",
+            "task": task,
+            "rounds": len(demo["rounds"]),
+            "diagnosis": diagnosis
+        }
+    }
 
 
 def render_code_output(data: dict):
@@ -528,7 +671,7 @@ def main():
         
         with col3:
             business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(st.session_state.used_examples["business"])
-            if st.button(f"📈 ({business_remaining})", key="ex_business", help="Random business example"):
+            if st.button(f"📈 Demo ({business_remaining})", key="ex_business", help="Business diagnosis demo - shows complete Q&A flow"):
                 example = get_random_example("business")
                 if example:
                     # Reset business Q&A state for fresh start
@@ -536,7 +679,11 @@ def main():
                     st.session_state.business_original_task = None
                     st.session_state.business_collected_answers = {}
                     st.session_state.business_answer_round = 0
-                    st.session_state.pending_example = {"task": example, "type": "business"}
+                    # Check if this example has a demo available
+                    if example in BUSINESS_DEMOS:
+                        st.session_state.pending_example = {"task": example, "type": "business_demo"}
+                    else:
+                        st.session_state.pending_example = {"task": example, "type": "business"}
                     st.session_state.show_welcome = False
                     st.rerun()
         
@@ -569,16 +716,32 @@ def main():
         
         st.session_state.messages.append({"role": "user", "content": task})
         
+        # Handle business demo mode - shows complete automated Q&A flow
+        if example_type == "business_demo":
+            with st.chat_message("assistant"):
+                result = render_business_demo(task)
+                if result is None:
+                    # Fallback to regular API call if no demo available
+                    with st.spinner("🔄 Processing with business agent..."):
+                        result = send_task(task, "business")
+            
+            st.session_state.messages.append({"role": "assistant", "content": result})
+            st.rerun()
+        
         # Store original task if business type
-        if example_type == "business":
+        elif example_type == "business":
             st.session_state.business_original_task = task
+            with st.spinner("🔄 Processing with business agent..."):
+                result = send_task(task, "business")
+            st.session_state.messages.append({"role": "assistant", "content": result})
+            st.rerun()
         
-        with st.spinner(f"🔄 Processing with {example_type} agent..."):
-            agent_type_to_use = example_type if agent_mode == "Automatic" else agent_mode.lower()
-            result = send_task(task, agent_type_to_use)
-        
-        st.session_state.messages.append({"role": "assistant", "content": result})
-        st.rerun()
+        else:
+            with st.spinner(f"🔄 Processing with {example_type} agent..."):
+                agent_type_to_use = example_type if agent_mode == "Automatic" else agent_mode.lower()
+                result = send_task(task, agent_type_to_use)
+            st.session_state.messages.append({"role": "assistant", "content": result})
+            st.rerun()
     
     # Chat input
     if task := st.chat_input("Ask me anything..." if not st.session_state.business_questions else "Type your answers here..."):

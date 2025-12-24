@@ -203,32 +203,102 @@ Respond with a JSON object containing:
         for q, a in collected_answers.items():
             context += f"**Q:** {q}\n**A:** {a}\n\n"
         
-        parser = PydanticOutputParser(pydantic_object=BusinessDiagnosis)
+        self.logger.info(f"Generating diagnosis with {len(collected_answers)} Q&A pairs")
         
-        # Escape curly braces in format instructions
-        format_instructions = parser.get_format_instructions()
-        escaped_instructions = format_instructions.replace("{", "{{").replace("}", "}}")
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", self.system_prompt),
-            ("system", self.diagnosis_prompt),
-            ("system", f"You must respond in this exact JSON format:\n{escaped_instructions}"),
-            ("human", context)
-        ])
-        
+        # Simple prompt that doesn't rely on complex parsing
+        diagnosis_prompt_simple = f"""Based on the Socratic questioning dialogue below, provide a comprehensive business diagnosis.
+
+{context}
+
+Analyze the information and respond with a JSON object containing exactly these fields:
+{{
+    "customer_stated_problem": "What the customer initially described (quote their words)",
+    "identified_business_problem": "The actual underlying issue you've uncovered",
+    "hidden_root_risk": "The deeper systemic risk if not addressed",
+    "urgency_level": "Low" or "Medium" or "Critical"
+}}
+
+Be specific and reference details from the conversation. Do not use placeholder text."""
+
         try:
-            chain = prompt | self.llm | parser
-            diagnosis = await chain.ainvoke({})
-            return diagnosis
-        except Exception as e:
-            self.logger.error(f"Diagnosis generation failed: {e}")
-            # Return a structured fallback
+            # First attempt: Direct LLM call with simple prompt
+            response = await self.llm.ainvoke([
+                ("system", self.system_prompt),
+                ("system", self.diagnosis_prompt),
+                ("human", diagnosis_prompt_simple)
+            ])
+            
+            content = response.content
+            self.logger.info(f"Raw LLM diagnosis response: {content[:500]}...")
+            
+            # Extract JSON from response
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            
+            # Try to find JSON object in response
+            import re
+            json_match = re.search(r'\{[^{}]*"customer_stated_problem"[^{}]*\}', content, re.DOTALL)
+            if json_match:
+                content = json_match.group()
+            
+            data = json.loads(content.strip())
+            
             return BusinessDiagnosis(
-                customer_stated_problem=task,
-                identified_business_problem="Unable to complete full analysis - insufficient information gathered",
-                hidden_root_risk="Unknown - recommend conducting complete diagnostic interview",
-                urgency_level="Medium"
+                customer_stated_problem=data.get("customer_stated_problem", task),
+                identified_business_problem=data.get("identified_business_problem", "Analysis pending"),
+                hidden_root_risk=data.get("hidden_root_risk", "Risk assessment pending"),
+                urgency_level=data.get("urgency_level", "Medium")
             )
+            
+        except json.JSONDecodeError as e:
+            self.logger.error(f"JSON parsing failed: {e}")
+            self.logger.error(f"Content was: {content[:500] if content else 'None'}")
+            
+            # Second attempt: Ask for cleaner output
+            try:
+                retry_response = await self.llm.ainvoke([
+                    ("system", "You are a JSON generator. Output ONLY valid JSON, no other text."),
+                    ("human", f"""Given this business problem and collected information, generate a diagnosis.
+
+Problem: {task}
+
+Information gathered:
+{chr(10).join(f'Q: {q} -> A: {a}' for q, a in collected_answers.items())}
+
+Output ONLY this JSON structure:
+{{"customer_stated_problem": "...", "identified_business_problem": "...", "hidden_root_risk": "...", "urgency_level": "..."}}""")
+                ])
+                
+                retry_content = retry_response.content.strip()
+                if retry_content.startswith("```"):
+                    retry_content = retry_content.split("```")[1]
+                    if retry_content.startswith("json"):
+                        retry_content = retry_content[4:]
+                
+                data = json.loads(retry_content.strip())
+                return BusinessDiagnosis(
+                    customer_stated_problem=data.get("customer_stated_problem", task),
+                    identified_business_problem=data.get("identified_business_problem", "Analysis completed"),
+                    hidden_root_risk=data.get("hidden_root_risk", "Requires further investigation"),
+                    urgency_level=data.get("urgency_level", "Medium")
+                )
+                
+            except Exception as retry_error:
+                self.logger.error(f"Retry also failed: {retry_error}")
+            
+        except Exception as e:
+            self.logger.error(f"Diagnosis generation failed: {type(e).__name__}: {e}")
+        
+        # Ultimate fallback - be honest about the failure
+        self.logger.error("SYSTEM ERROR: All diagnosis generation attempts failed")
+        return BusinessDiagnosis(
+            customer_stated_problem=task,
+            identified_business_problem="⚠️ SYSTEM ERROR: The AI failed to generate a diagnosis. This is a technical issue, not a reflection of your answers. Please try again or contact support.",
+            hidden_root_risk="⚠️ SYSTEM ERROR: Diagnosis generation failed. The system was unable to parse the AI response. Your information was collected but the final analysis could not be completed.",
+            urgency_level="Critical"  # Mark as critical so user knows to take action
+        )
     
     async def _validate_answers(
         self,

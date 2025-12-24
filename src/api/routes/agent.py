@@ -418,11 +418,13 @@ async def execute_direct(
             "agent_type": result.get("agent_type")
         })
         
-        return TaskResponse(
-            task_id=task_id,
-            status=TaskStatus.COMPLETED,
-            message=f"Task executed with {agent_type} agent"
-        )
+        # Return result directly (no polling needed)
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "agent_type": result.get("agent_type"),
+            "result": result
+        }
         
     except Exception as e:
         logger.error(f"Direct execution failed: {e}")
