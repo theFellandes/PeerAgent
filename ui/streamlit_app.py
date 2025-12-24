@@ -358,38 +358,69 @@ def send_business_continuation(
     except Exception as e:
         return {"error": str(e)}
 
-
 def render_business_demo(task: str) -> Optional[dict]:
     """Render a complete business demo with simulated Q&A flow.
     
-    This shows the full Socratic questioning process without requiring
-    actual user input - great for demonstrations.
+    Calls the API to run the full Socratic questioning demo where
+    the LLM generates both questions AND answers automatically.
     """
-    if task not in BUSINESS_DEMOS:
+    # Try to call the demo API
+    try:
+        endpoint = f"{API_URL}/v1/agent/business/demo"
+        with st.spinner("🎬 Generating demo... (LLM is creating questions and answers)"):
+            response = requests.post(
+                endpoint,
+                json={"task": task, "session_id": st.session_state.session_id},
+                timeout=180  # Demo takes longer - 3 phases of LLM calls
+            )
+            response.raise_for_status()
+            result = response.json()
+    except Exception as e:
+        st.error(f"⚠️ Demo generation failed: {e}")
+        # Fall back to pre-built demo if available
+        if task in BUSINESS_DEMOS:
+            demo_data = BUSINESS_DEMOS[task]
+            result = {
+                "demo_mode": True,
+                "result": {
+                    "type": "demo",
+                    "task": task,
+                    "rounds": demo_data["rounds"],
+                    "diagnosis": demo_data["diagnosis"]
+                }
+            }
+        else:
+            return None
+    
+    # Extract demo data
+    demo_result = result.get("result", result)
+    rounds = demo_result.get("rounds", [])
+    diagnosis = demo_result.get("diagnosis", {})
+    
+    if not rounds:
+        st.error("Demo did not generate any Q&A rounds")
         return None
     
-    demo = BUSINESS_DEMOS[task]
-    
     # Display the problem statement
-    st.markdown(f"### 📋 Problem Statement")
-    st.info(f"**{task}**")
+    st.markdown(f"### 📋 Demo: Socratic Questioning Flow")
+    st.info(f"**Problem:** {task}")
     st.markdown("---")
-    st.markdown("*Below is a demonstration of how the Socratic questioning process works:*")
+    st.markdown("*Below is a demonstration of how the AI diagnoses business problems through questioning:*")
     st.markdown("")
     
     # Display each round
-    for i, round_data in enumerate(demo["rounds"], 1):
-        phase = round_data["phase"]
-        emoji = round_data["phase_emoji"]
-        questions = round_data["questions"]
-        answer = round_data["answer"]
+    for i, round_data in enumerate(rounds, 1):
+        phase = round_data.get("phase", f"phase_{i}")
+        emoji = round_data.get("phase_emoji", "🔍")
+        questions = round_data.get("questions", [])
+        answer = round_data.get("answer", "")
         
         phase_titles = {
             "identify": "Problem Identification",
             "clarify": "Scope & Urgency", 
             "diagnose": "Root Cause Discovery"
         }
-        phase_title = phase_titles.get(phase, phase)
+        phase_title = phase_titles.get(phase, phase.title())
         
         # Questions section
         st.markdown(f"### {emoji} Phase {i}: {phase_title}")
@@ -399,17 +430,16 @@ def render_business_demo(task: str) -> Optional[dict]:
         
         # Answer section
         st.markdown("")
-        st.markdown("**User responds:**")
+        st.markdown("**Simulated user responds:**")
         st.success(f"💬 \"{answer}\"")
         st.markdown("")
     
     # Display diagnosis
     st.markdown("---")
-    diagnosis = demo["diagnosis"]
     st.markdown("### 📊 Business Diagnosis Complete")
-    st.markdown(f"**Customer Stated Problem:** {diagnosis['customer_stated_problem']}")
-    st.markdown(f"**Identified Business Problem:** {diagnosis['identified_business_problem']}")
-    st.markdown(f"**Hidden Root Risk:** {diagnosis['hidden_root_risk']}")
+    st.markdown(f"**Customer Stated Problem:** {diagnosis.get('customer_stated_problem', task)}")
+    st.markdown(f"**Identified Business Problem:** {diagnosis.get('identified_business_problem', 'N/A')}")
+    st.markdown(f"**Hidden Root Risk:** {diagnosis.get('hidden_root_risk', 'N/A')}")
     urgency = diagnosis.get("urgency_level", "Medium")
     urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
     st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
@@ -421,10 +451,11 @@ def render_business_demo(task: str) -> Optional[dict]:
         "result": {
             "type": "demo",
             "task": task,
-            "rounds": len(demo["rounds"]),
+            "rounds": rounds,
             "diagnosis": diagnosis
         }
     }
+
 
 
 def render_code_output(data: dict):
@@ -509,6 +540,53 @@ def render_business_output(data: dict):
         st.session_state.business_original_task = None
         st.session_state.business_collected_answers = {}
         st.session_state.business_answer_round = 0  # Reset round counter
+    
+    elif output_type == "demo" or data.get("demo_mode"):
+        # Re-render the demo from stored data
+        task = output_data.get("task") or data.get("result", {}).get("task", "")
+        if task and task in BUSINESS_DEMOS:
+            demo = BUSINESS_DEMOS[task]
+            
+            st.markdown(f"### 📋 Demo: Socratic Questioning Flow")
+            st.info(f"**Problem:** {task}")
+            st.markdown("---")
+            
+            # Display each round
+            for i, round_data in enumerate(demo["rounds"], 1):
+                phase = round_data["phase"]
+                emoji = round_data["phase_emoji"]
+                questions = round_data["questions"]
+                answer = round_data["answer"]
+                
+                phase_titles = {
+                    "identify": "Problem Identification",
+                    "clarify": "Scope & Urgency", 
+                    "diagnose": "Root Cause Discovery"
+                }
+                phase_title = phase_titles.get(phase, phase)
+                
+                st.markdown(f"### {emoji} Phase {i}: {phase_title}")
+                st.markdown("**Agent asks:**")
+                for j, q in enumerate(questions, 1):
+                    st.markdown(f"  {j}. *{q}*")
+                
+                st.markdown("")
+                st.markdown("**User responds:**")
+                st.success(f"💬 \"{answer}\"")
+                st.markdown("")
+            
+            # Display diagnosis
+            st.markdown("---")
+            diagnosis = demo["diagnosis"]
+            st.markdown("### 📊 Business Diagnosis Complete")
+            st.markdown(f"**Customer Stated Problem:** {diagnosis['customer_stated_problem']}")
+            st.markdown(f"**Identified Business Problem:** {diagnosis['identified_business_problem']}")
+            st.markdown(f"**Hidden Root Risk:** {diagnosis['hidden_root_risk']}")
+            urgency = diagnosis.get("urgency_level", "Medium")
+            urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
+            st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
+        else:
+            st.json(output_data)
     else:
         st.json(output_data)
 
@@ -718,15 +796,19 @@ def main():
         
         # Handle business demo mode - shows complete automated Q&A flow
         if example_type == "business_demo":
-            with st.chat_message("assistant"):
-                result = render_business_demo(task)
-                if result is None:
-                    # Fallback to regular API call if no demo available
-                    with st.spinner("🔄 Processing with business agent..."):
-                        result = send_task(task, "business")
-            
-            st.session_state.messages.append({"role": "assistant", "content": result})
-            st.rerun()
+            # Check if demo is available
+            if task in BUSINESS_DEMOS:
+                with st.chat_message("assistant"):
+                    result = render_business_demo(task)
+                st.session_state.messages.append({"role": "assistant", "content": result})
+                st.rerun()
+            else:
+                # No demo available - use regular interactive flow
+                st.session_state.business_original_task = task
+                with st.spinner("🔄 Processing with business agent..."):
+                    result = send_task(task, "business")
+                st.session_state.messages.append({"role": "assistant", "content": result})
+                st.rerun()
         
         # Store original task if business type
         elif example_type == "business":

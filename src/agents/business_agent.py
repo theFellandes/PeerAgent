@@ -586,3 +586,121 @@ Be strict but helpful. If the answer is irrelevant, can_proceed should be false.
             round_number=1
         )
 
+    async def execute_demo(self, task: str) -> Dict[str, Any]:
+        """
+        Execute a complete demo of the Socratic questioning flow.
+        
+        The LLM generates both questions AND realistic answers, 
+        simulating an entire conversation through all 3 phases to diagnosis.
+        This is used for demonstrations without requiring user input.
+        """
+        self.logger.info(f"Starting demo execution for: {task[:50]}...")
+        
+        phases = ["identify", "clarify", "diagnose"]
+        phase_config = {
+            "identify": {"emoji": "🔍", "title": "Problem Identification"},
+            "clarify": {"emoji": "🎯", "title": "Scope & Urgency"},
+            "diagnose": {"emoji": "🔬", "title": "Root Cause Discovery"}
+        }
+        
+        rounds = []
+        collected_answers = {}
+        
+        for i, phase in enumerate(phases):
+            self.logger.info(f"Demo phase {i+1}: {phase}")
+            
+            # Generate questions for this phase
+            questions_result = await self._generate_questions(
+                task=task,
+                phase=phase,
+                collected_answers=collected_answers
+            )
+            questions = questions_result.get("questions", [])
+            
+            if not questions:
+                self.logger.warning(f"No questions generated for phase {phase}")
+                continue
+            
+            # Generate realistic answers using LLM
+            answer = await self._generate_demo_answer(
+                task=task,
+                questions=questions,
+                phase=phase,
+                previous_answers=collected_answers
+            )
+            
+            # Store this round
+            rounds.append({
+                "phase": phase,
+                "phase_emoji": phase_config[phase]["emoji"],
+                "questions": questions,
+                "answer": answer
+            })
+            
+            # Store answers for next phase context
+            for q in questions:
+                collected_answers[q] = answer
+        
+        # Generate final diagnosis
+        self.logger.info("Generating demo diagnosis...")
+        diagnosis = await self._generate_diagnosis(task, collected_answers)
+        
+        return {
+            "type": "demo",
+            "task": task,
+            "rounds": rounds,
+            "diagnosis": {
+                "customer_stated_problem": diagnosis.customer_stated_problem,
+                "identified_business_problem": diagnosis.identified_business_problem,
+                "hidden_root_risk": diagnosis.hidden_root_risk,
+                "urgency_level": diagnosis.urgency_level
+            }
+        }
+
+    async def _generate_demo_answer(
+        self,
+        task: str,
+        questions: List[str],
+        phase: str,
+        previous_answers: Dict[str, str]
+    ) -> str:
+        """Generate a realistic user answer for demo purposes."""
+        
+        questions_formatted = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(questions))
+        
+        previous_context = ""
+        if previous_answers:
+            previous_context = "\n\nPrevious Q&A:\n"
+            for q, a in previous_answers.items():
+                previous_context += f"Q: {q}\nA: {a}\n\n"
+        
+        prompt = f"""You are simulating a business professional answering diagnostic questions about their problem.
+
+## The Original Business Problem
+{task}
+
+## Current Phase: {phase.upper()}
+
+## Questions Being Asked
+{questions_formatted}
+{previous_context}
+## Your Task
+Generate a realistic, detailed answer that a business professional would give to these questions.
+The answer should:
+1. Be specific with numbers, percentages, timeframes where appropriate
+2. Sound authentic and natural (not generic)
+3. Reveal information useful for diagnosis
+4. Be 2-4 sentences long, addressing all questions together
+5. Include specific business context and realistic details
+
+Respond with ONLY the answer text, no quotes or prefixes."""
+
+        try:
+            response = await self.llm.ainvoke([
+                ("system", "You are simulating a business professional responding to diagnostic questions. Be specific and realistic."),
+                ("human", prompt)
+            ])
+            return response.content.strip()
+        except Exception as e:
+            self.logger.error(f"Demo answer generation failed: {e}")
+            return f"We noticed this issue about 3 months ago. The impact has been significant - roughly a 25% decline in our key metrics. This is definitely a top priority for our leadership team."

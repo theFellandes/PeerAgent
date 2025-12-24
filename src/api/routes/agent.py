@@ -51,7 +51,6 @@ def map_status(store_status: StoreStatus) -> TaskStatus:
 
 @router.post(
     "/execute",
-    response_model=TaskResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Bad Request - Empty task"},
         429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"},
@@ -81,7 +80,7 @@ async def execute_task(
     body: TaskExecuteRequest,
     background_tasks: BackgroundTasks,
     peer_agent: PeerAgent = Depends(get_peer_agent)
-) -> TaskResponse:
+) -> Dict[str, Any]:
     """
     Execute a task via the PeerAgent system.
     
@@ -139,11 +138,13 @@ async def execute_task(
         
         logger.info(f"Task {task_id} completed successfully")
         
-        return TaskResponse(
-            task_id=task_id,
-            status=TaskStatus.COMPLETED,
-            message="Task executed successfully"
-        )
+        # Return result directly (no polling needed)
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "agent_type": result.get("agent_type"),
+            "result": result
+        }
         
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}")
@@ -343,7 +344,6 @@ async def delete_task(task_id: str) -> dict:
 
 @router.post(
     "/execute/direct/{agent_type}",
-    response_model=TaskResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid agent type"},
         429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"}
@@ -367,7 +367,7 @@ async def execute_direct(
     agent_type: str,
     body: TaskExecuteRequest,
     peer_agent: PeerAgent = Depends(get_peer_agent)
-) -> TaskResponse:
+) -> Dict[str, Any]:
     """Execute a task with a specific agent type."""
     valid_types = ["code", "content", "business", "problem"]
     
@@ -517,6 +517,49 @@ async def continue_business_analysis(
     except Exception as e:
         logger.error(f"Business continuation failed: {e}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post(
+    "/business/demo",
+    summary="Business Demo",
+    description="Run a complete demo of the business Socratic questioning flow. The LLM generates both questions AND answers automatically."
+)
+@limiter.limit("5/minute")
+async def business_demo(
+    request: Request,
+    body: TaskExecuteRequest,
+    peer_agent: PeerAgent = Depends(get_peer_agent)
+) -> Dict[str, Any]:
+    """
+    Run a complete business diagnosis demo.
+    
+    The LLM generates questions for each phase and then generates
+    realistic answers to those questions, simulating a full conversation.
+    """
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    try:
+        business_agent = peer_agent.business_agent
+        result = await business_agent.execute_demo(task=body.task)
+        
+        return {
+            "task_id": f"demo-{uuid.uuid4().hex[:8]}",
+            "status": "completed",
+            "agent_type": "business_sense_agent",
+            "demo_mode": True,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Demo execution failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": f"Demo failed: {str(e)}", "code": "DEMO_ERROR"}
+        )
 
 
 # ==============================================================================
