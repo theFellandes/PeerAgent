@@ -465,7 +465,7 @@ async def continue_business_analysis(
         session_tasks = task_store.get_session_tasks(body.session_id, limit=5)
         previous_task = ""
         for t in session_tasks:
-            if t.task:
+            if t.task and t.task != "Business analysis continuation":
                 previous_task = t.task
                 break
         
@@ -476,13 +476,21 @@ async def continue_business_analysis(
             task_id=task_id
         )
         
+        # Properly serialize the result
+        result_data = result.get("data")
+        serialized_result = {
+            "agent_type": "business_sense_agent",
+            "type": result.get("type"),
+            "data": result_data.model_dump() if hasattr(result_data, 'model_dump') else result_data
+        }
+        
         # Store result
         task_data = TaskData(
             task_id=task_id,
             status=StoreStatus.COMPLETED,
             task="Business analysis continuation",
             session_id=body.session_id,
-            result=result,
+            result=serialized_result,
             agent_type="business_sense_agent",
             completed_at=datetime.utcnow().isoformat()
         )
