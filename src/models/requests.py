@@ -16,6 +16,12 @@ class TaskExecuteRequest(BaseModel):
     task: str = Field(..., min_length=1, description="The task to execute")
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
     context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context")
+    priority: Optional[int] = Field(
+        None, 
+        ge=1, 
+        le=3, 
+        description="Task priority: 3=high (business), 2=medium (code), 1=low (content). Auto-assigned if not provided."
+    )
     
     model_config = {
         "json_schema_extra": {
@@ -23,12 +29,14 @@ class TaskExecuteRequest(BaseModel):
                 {
                     "task": "Write a Python function to read a file",
                     "session_id": "user-123-session-abc",
-                    "context": {}
+                    "context": {},
+                    "priority": 2
                 },
                 {
                     "task": "My sales are dropping by 20% yearly, help me understand the root cause",
                     "session_id": None,
-                    "context": {"industry": "retail"}
+                    "context": {"industry": "retail"},
+                    "priority": 3
                 }
             ]
         }

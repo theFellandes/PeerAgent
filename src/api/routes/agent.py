@@ -128,21 +128,34 @@ async def execute_task(
             task_id=task_id
         )
         
+        # Auto-assign priority based on agent type if not provided
+        # Business problems get highest priority (3), code medium (2), content low (1)
+        priority_map = {
+            "business_sense_agent": 3,
+            "code_agent": 2,
+            "content_agent": 1,
+            "peer_agent": 2  # Default to medium
+        }
+        agent_type = result.get("agent_type", "peer_agent")
+        priority = body.priority or priority_map.get(agent_type, 2)
+        
+        logger.info(f"Task {task_id} completed | agent={agent_type} | priority={priority}")
+        
         # Update task with result
         task_store.update(task_id, {
             "status": StoreStatus.COMPLETED,
             "result": result,
             "completed_at": datetime.utcnow().isoformat(),
-            "agent_type": result.get("agent_type")
+            "agent_type": agent_type,
+            "priority": priority
         })
-        
-        logger.info(f"Task {task_id} completed successfully")
         
         # Return result directly (no polling needed)
         return {
             "task_id": task_id,
             "status": "completed",
-            "agent_type": result.get("agent_type"),
+            "agent_type": agent_type,
+            "priority": priority,
             "result": result
         }
         
@@ -163,6 +176,89 @@ async def execute_task(
             status_code=500,
             detail={"error": str(e), "code": "EXECUTION_ERROR"}
         )
+
+
+@router.post(
+    "/execute/stream",
+    summary="Execute with Streaming Response",
+    description="""
+Execute a task with Server-Sent Events (SSE) streaming.
+
+The response is streamed as SSE events, with each chunk containing a portion 
+of the LLM response. Use this for long-running tasks where you want to show
+progressive output to the user.
+
+**Event Types:**
+- `data: {"content": "..."}` - A chunk of the response
+- `data: {"done": true}` - Stream completed
+- `data: {"error": "..."}` - An error occurred
+
+**Rate Limit:** 5 requests per minute
+    """
+)
+@limiter.limit("5/minute")
+async def execute_task_stream(
+    request: Request,
+    body: TaskExecuteRequest,
+    peer_agent: PeerAgent = Depends(get_peer_agent)
+):
+    """Execute a task with streaming SSE response."""
+    from src.api.streaming import create_sse_response, stream_llm_response
+    
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    task_id = f"task-stream-{uuid.uuid4().hex[:8]}"
+    session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
+    
+    logger.info(f"Starting streamed task {task_id}: {body.task[:50]}...")
+    
+    async def generate_stream():
+        """Generate streaming response."""
+        import json
+        
+        # Classify the task first
+        classification = await peer_agent.classify_task(body.task)
+        yield f"data: {json.dumps({'event': 'classification', 'agent': classification})}\n\n"
+        
+        # Get the appropriate agent
+        if classification == "code":
+            agent = peer_agent.code_agent
+        elif classification == "content":
+            agent = peer_agent.content_agent
+        elif classification == "business":
+            agent = peer_agent.business_agent
+        else:
+            agent = peer_agent
+        
+        # Stream the LLM response
+        messages = agent.create_messages(body.task)
+        
+        full_response = ""
+        async for chunk in agent.llm.astream(messages):
+            if hasattr(chunk, 'content') and chunk.content:
+                full_response += chunk.content
+                yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+        
+        # Send completion with metadata
+        priority_map = {"business_sense_agent": 3, "code_agent": 2, "content_agent": 1}
+        priority = body.priority or priority_map.get(agent.agent_type, 2)
+        
+        yield f"data: {json.dumps({'done': True, 'agent_type': agent.agent_type, 'priority': priority, 'task_id': task_id})}\n\n"
+    
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @router.post(
