@@ -146,7 +146,7 @@ BUSINESS_DEMOS = {
         "rounds": [
             {
                 "phase": "identify",
-                "phase_emoji": "🔍", 
+                "phase_emoji": "🔍",
                 "questions": [
                     "When did you realize the launch wasn't meeting targets?",
                     "What were the specific targets vs actual results?",
@@ -255,9 +255,9 @@ def init_session_state():
 def get_random_example(category: str) -> Optional[str]:
     """Get a random unused example from the pool or fallback."""
     if not st.session_state.using_fallback[category]:
-        available = [ex for ex in EXAMPLE_POOL[category] 
+        available = [ex for ex in EXAMPLE_POOL[category]
                      if ex not in st.session_state.used_examples[category]]
-        
+
         if available:
             example = random.choice(available)
             st.session_state.used_examples[category].append(example)
@@ -265,16 +265,16 @@ def get_random_example(category: str) -> Optional[str]:
             return example
         else:
             st.session_state.using_fallback[category] = True
-    
-    fallback_available = [ex for ex in FALLBACK_EXAMPLES[category] 
+
+    fallback_available = [ex for ex in FALLBACK_EXAMPLES[category]
                           if ex not in st.session_state.used_examples[category]]
-    
+
     if fallback_available:
         example = random.choice(fallback_available)
         st.session_state.used_examples[category].append(example)
         st.session_state.example_count += 1
         return example
-    
+
     # All exhausted - reset and start over
     st.session_state.used_examples[category] = []
     st.session_state.using_fallback[category] = False
@@ -283,7 +283,7 @@ def get_random_example(category: str) -> Optional[str]:
 
 def send_task(task: str, agent_type: Optional[str] = None) -> dict:
     """Send a task to the API and get direct result.
-    
+
     The API now returns result directly in response body.
     """
     try:
@@ -291,7 +291,7 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
             endpoint = f"{API_URL}/v1/agent/execute/direct/{agent_type}"
         else:
             endpoint = f"{API_URL}/v1/agent/execute"
-        
+
         response = requests.post(
             endpoint,
             json={"task": task, "session_id": st.session_state.session_id},
@@ -299,10 +299,10 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
         )
         response.raise_for_status()
         result = response.json()
-        
+
         # API now returns result directly - no need to poll
         return result
-        
+
     except requests.exceptions.ConnectionError:
         return {"error": "Could not connect to API. Make sure the server is running."}
     except requests.exceptions.Timeout:
@@ -312,33 +312,33 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
 
 
 def send_business_continuation(
-    original_task: str, 
-    answers: Dict[str, str], 
-    answer_round: int,
-    latest_answer: str = None,
-    previous_questions: List[str] = None
+        original_task: str,
+        answers: Dict[str, str],
+        answer_round: int,
+        latest_answer: str = None,
+        previous_questions: List[str] = None
 ) -> dict:
     """Send collected answers to continue business analysis.
-    
+
     The API validates the answer quality before proceeding.
     If answer is irrelevant, it returns the same questions with feedback.
     """
     try:
         endpoint = f"{API_URL}/v1/agent/business/continue"
-        
+
         payload = {
             "session_id": st.session_state.session_id,
             "answers": answers,
             "answer_round": answer_round,
             "original_task": original_task
         }
-        
+
         # Add validation params if provided
         if latest_answer:
             payload["latest_answer"] = latest_answer
         if previous_questions:
             payload["previous_questions"] = previous_questions
-        
+
         response = requests.post(
             endpoint,
             json=payload,
@@ -346,11 +346,11 @@ def send_business_continuation(
         )
         response.raise_for_status()
         result = response.json()
-        
+
         # The API now returns result directly - no need to poll
         # Response format: {task_id, status, agent_type, result: {...}}
         return result
-        
+
     except requests.exceptions.ConnectionError:
         return {"error": "Could not connect to API. Make sure the server is running."}
     except requests.exceptions.Timeout:
@@ -358,9 +358,10 @@ def send_business_continuation(
     except Exception as e:
         return {"error": str(e)}
 
+
 def render_business_demo(task: str) -> Optional[dict]:
     """Render a complete business demo with simulated Q&A flow.
-    
+
     Calls the API to run the full Socratic questioning demo where
     the LLM generates both questions AND answers automatically.
     """
@@ -391,49 +392,49 @@ def render_business_demo(task: str) -> Optional[dict]:
             }
         else:
             return None
-    
+
     # Extract demo data
     demo_result = result.get("result", result)
     rounds = demo_result.get("rounds", [])
     diagnosis = demo_result.get("diagnosis", {})
-    
+
     if not rounds:
         st.error("Demo did not generate any Q&A rounds")
         return None
-    
+
     # Display the problem statement
     st.markdown(f"### 📋 Demo: Socratic Questioning Flow")
     st.info(f"**Problem:** {task}")
     st.markdown("---")
     st.markdown("*Below is a demonstration of how the AI diagnoses business problems through questioning:*")
     st.markdown("")
-    
+
     # Display each round
     for i, round_data in enumerate(rounds, 1):
         phase = round_data.get("phase", f"phase_{i}")
         emoji = round_data.get("phase_emoji", "🔍")
         questions = round_data.get("questions", [])
         answer = round_data.get("answer", "")
-        
+
         phase_titles = {
             "identify": "Problem Identification",
-            "clarify": "Scope & Urgency", 
+            "clarify": "Scope & Urgency",
             "diagnose": "Root Cause Discovery"
         }
         phase_title = phase_titles.get(phase, phase.title())
-        
+
         # Questions section
         st.markdown(f"### {emoji} Phase {i}: {phase_title}")
         st.markdown("**Agent asks:**")
         for j, q in enumerate(questions, 1):
             st.markdown(f"  {j}. *{q}*")
-        
+
         # Answer section
         st.markdown("")
         st.markdown("**Simulated user responds:**")
         st.success(f"💬 \"{answer}\"")
         st.markdown("")
-    
+
     # Display diagnosis
     st.markdown("---")
     st.markdown("### 📊 Business Diagnosis Complete")
@@ -443,7 +444,7 @@ def render_business_demo(task: str) -> Optional[dict]:
     urgency = diagnosis.get("urgency_level", "Medium")
     urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
     st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
-    
+
     # Return a formatted result for the messages
     return {
         "agent_type": "business_sense_agent",
@@ -457,14 +458,13 @@ def render_business_demo(task: str) -> Optional[dict]:
     }
 
 
-
 def render_code_output(data: dict):
     """Render code agent output."""
     st.markdown("**Generated Code:**")
     language = data.get("language", "python")
     code = data.get("code", "")
     st.code(code, language=language)
-    
+
     if data.get("explanation"):
         st.markdown("**Explanation:**")
         st.markdown(data["explanation"])
@@ -473,7 +473,7 @@ def render_code_output(data: dict):
 def render_content_output(data: dict):
     """Render content agent output."""
     st.markdown(data.get("content", ""))
-    
+
     sources = data.get("sources", [])
     if sources:
         st.markdown("---")
@@ -486,7 +486,7 @@ def render_business_output(data: dict):
     """Render business agent output."""
     output_type = data.get("type", "")
     output_data = data.get("data", data)
-    
+
     # Handle nested data structure
     if isinstance(output_data, dict) and "questions" in output_data:
         questions = output_data.get("questions", [])
@@ -494,13 +494,13 @@ def render_business_output(data: dict):
         questions = data.get("questions", [])
     else:
         questions = []
-    
+
     # Get phase info from data
     phase = output_data.get("phase") or data.get("phase", "")
     phase_emoji = output_data.get("phase_emoji") or data.get("phase_emoji", "🤔")
     round_number = output_data.get("round_number") or data.get("round_number", 1)
     feedback = output_data.get("feedback") or data.get("feedback")
-    
+
     if output_type == "questions" or questions:
         # Display phase header with emoji
         phase_titles = {
@@ -509,12 +509,12 @@ def render_business_output(data: dict):
             "diagnose": "Root Cause Discovery"
         }
         phase_title = phase_titles.get(phase, "Clarifying Questions")
-        
+
         # Display feedback warning if validation failed
         if feedback:
             st.warning(f"⚠️ **Please provide more relevant information**\n\n{feedback}")
             st.markdown("")
-        
+
         st.markdown(f"### {phase_emoji} {phase_title} (Round {round_number}/3)")
         st.markdown("*Please answer these questions to help me better understand your situation:*")
         st.markdown("")
@@ -522,10 +522,10 @@ def render_business_output(data: dict):
             st.markdown(f"**{i}.** {q}")
         st.markdown("")
         st.info("💡 **Tip:** Type your answers in the chat box below. You can answer all questions in one message.")
-        
+
         # Store questions for answer collection
         st.session_state.business_questions = questions
-        
+
     elif output_type == "diagnosis" or "customer_stated_problem" in output_data:
         st.markdown("### 📊 Business Diagnosis Complete")
         st.markdown(f"**Customer Stated Problem:** {output_data.get('customer_stated_problem', 'N/A')}")
@@ -534,58 +534,66 @@ def render_business_output(data: dict):
         urgency = output_data.get("urgency_level", "Medium")
         urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
         st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
-        
+
         # Clear business Q&A state after diagnosis
         st.session_state.business_questions = None
         st.session_state.business_original_task = None
         st.session_state.business_collected_answers = {}
         st.session_state.business_answer_round = 0  # Reset round counter
-    
+
     elif output_type == "demo" or data.get("demo_mode"):
-        # Re-render the demo from stored data
-        task = output_data.get("task") or data.get("result", {}).get("task", "")
-        if task and task in BUSINESS_DEMOS:
-            demo = BUSINESS_DEMOS[task]
-            
-            st.markdown(f"### 📋 Demo: Socratic Questioning Flow")
+        # Re-render the demo from stored data (works for API-generated OR hardcoded demos)
+        # Extract the demo data from wherever it's stored in the result
+        demo_result = data.get("result", {}) if "result" in data else output_data
+        task = demo_result.get("task", "") or output_data.get("task", "")
+        rounds = demo_result.get("rounds", []) or output_data.get("rounds", [])
+        diagnosis = demo_result.get("diagnosis", {}) or output_data.get("diagnosis", {})
+
+        if rounds:
+            st.markdown("### 📋 Demo: Socratic Questioning Flow")
             st.info(f"**Problem:** {task}")
             st.markdown("---")
-            
+            st.markdown("*Below is a demonstration of how the AI diagnoses business problems through questioning:*")
+            st.markdown("")
+
+            phase_titles = {
+                "identify": "Problem Identification",
+                "clarify": "Scope & Urgency",
+                "diagnose": "Root Cause Discovery"
+            }
+
             # Display each round
-            for i, round_data in enumerate(demo["rounds"], 1):
-                phase = round_data["phase"]
-                emoji = round_data["phase_emoji"]
-                questions = round_data["questions"]
-                answer = round_data["answer"]
-                
-                phase_titles = {
-                    "identify": "Problem Identification",
-                    "clarify": "Scope & Urgency", 
-                    "diagnose": "Root Cause Discovery"
-                }
-                phase_title = phase_titles.get(phase, phase)
-                
+            for i, round_data in enumerate(rounds, 1):
+                phase = round_data.get("phase", f"phase_{i}")
+                emoji = round_data.get("phase_emoji", "🔍")
+                questions = round_data.get("questions", [])
+                answer = round_data.get("answer", "")
+
+                phase_title = phase_titles.get(phase, phase.title() if phase else f"Phase {i}")
+
                 st.markdown(f"### {emoji} Phase {i}: {phase_title}")
                 st.markdown("**Agent asks:**")
                 for j, q in enumerate(questions, 1):
                     st.markdown(f"  {j}. *{q}*")
-                
+
                 st.markdown("")
-                st.markdown("**User responds:**")
-                st.success(f"💬 \"{answer}\"")
+                st.markdown("**Simulated user responds:**")
+                st.success(f'💬 "{answer}"')
                 st.markdown("")
-            
+
             # Display diagnosis
-            st.markdown("---")
-            diagnosis = demo["diagnosis"]
-            st.markdown("### 📊 Business Diagnosis Complete")
-            st.markdown(f"**Customer Stated Problem:** {diagnosis['customer_stated_problem']}")
-            st.markdown(f"**Identified Business Problem:** {diagnosis['identified_business_problem']}")
-            st.markdown(f"**Hidden Root Risk:** {diagnosis['hidden_root_risk']}")
-            urgency = diagnosis.get("urgency_level", "Medium")
-            urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
-            st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
+            if diagnosis:
+                st.markdown("---")
+                st.markdown("### 📊 Business Diagnosis Complete")
+                st.markdown(f"**Customer Stated Problem:** {diagnosis.get('customer_stated_problem', task)}")
+                st.markdown(f"**Identified Business Problem:** {diagnosis.get('identified_business_problem', 'N/A')}")
+                st.markdown(f"**Hidden Root Risk:** {diagnosis.get('hidden_root_risk', 'N/A')}")
+                urgency = diagnosis.get("urgency_level", "Medium")
+                urgency_colors = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}
+                urgency_color = urgency_colors.get(urgency, "🟡")
+                st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
         else:
+            st.warning("Demo data is incomplete - no Q&A rounds found")
             st.json(output_data)
     else:
         st.json(output_data)
@@ -594,12 +602,12 @@ def render_business_output(data: dict):
 def render_response(result: dict):
     """Render the API response based on agent type."""
     if "error" in result and result["error"]:
-        st.error(f"❌ Error: {result['error']}")
+        st.error(f"âŒ Error: {result['error']}")
         return
-    
+
     agent_type = result.get("agent_type")
     data = result.get("result", result)
-    
+
     if isinstance(data, dict):
         if not agent_type:
             agent_type = data.get("agent_type", "unknown")
@@ -609,7 +617,7 @@ def render_response(result: dict):
             pass
         elif "data" in data:
             data = data["data"]
-    
+
     agent_names = {
         "code_agent": "💻 Code Agent",
         "content_agent": "📚 Content Agent",
@@ -617,11 +625,11 @@ def render_response(result: dict):
         "peer_agent": "🤖 Peer Agent"
     }
     st.markdown(f"*{agent_names.get(agent_type, str(agent_type))}*")
-    
+
     if not isinstance(data, dict):
         st.markdown(str(data))
         return
-    
+
     if agent_type == "code_agent":
         render_code_output(data)
     elif agent_type == "content_agent":
@@ -641,23 +649,23 @@ def render_response(result: dict):
 
 def handle_business_answer(user_input: str):
     """Handle user's answer to business questions.
-    
-    Each user response counts as ONE round, regardless of how many questions 
-    they address. The API validates answer quality - if irrelevant, we stay 
+
+    Each user response counts as ONE round, regardless of how many questions
+    they address. The API validates answer quality - if irrelevant, we stay
     in the same round.
     """
     if st.session_state.business_questions:
         # Store the previous questions for validation
         previous_questions = st.session_state.business_questions.copy()
-        
+
         # Tentatively increment round (will be reset if validation fails)
         tentative_round = st.session_state.business_answer_round + 1
-        
+
         # Store the user's combined answer for all pending questions
         combined_answer = user_input
         for q in st.session_state.business_questions:
             st.session_state.business_collected_answers[q] = combined_answer
-        
+
         # Continue the analysis with validation
         result = send_business_continuation(
             original_task=st.session_state.business_original_task or "",
@@ -666,12 +674,12 @@ def handle_business_answer(user_input: str):
             latest_answer=user_input,
             previous_questions=previous_questions
         )
-        
+
         # Check if validation passed
         if result and "result" in result:
             result_data = result.get("result", {})
             data_section = result_data.get("data", {})
-            
+
             # If there's feedback, validation likely failed - don't increment round
             if data_section.get("feedback"):
                 # Validation failed - keep same round
@@ -679,7 +687,7 @@ def handle_business_answer(user_input: str):
             else:
                 # Validation passed - commit the round increment
                 st.session_state.business_answer_round = tentative_round
-        
+
         return result
     return None
 
@@ -687,30 +695,30 @@ def handle_business_answer(user_input: str):
 def main():
     """Main Streamlit application."""
     init_session_state()
-    
+
     # Sidebar
     with st.sidebar:
         st.title("🤖 PeerAgent")
         st.markdown("---")
-        
+
         st.markdown("### Agent Selection")
         agent_mode = st.radio(
             "Routing Mode",
             ["Automatic", "Code", "Content", "Business"],
             help="Automatic lets the system decide which agent to use"
         )
-        
+
         st.markdown("---")
         st.markdown("### Session Info")
         st.text(f"Session: {st.session_state.session_id[:20]}...")
         st.text(f"Examples used: {st.session_state.example_count}")
-        
+
         # Show business Q&A status
         if st.session_state.business_questions:
-            st.warning("📝 Awaiting answers to questions")
-        
+            st.warning("🔍 Awaiting answers to questions")
+
         st.caption("💾 Session memory is enabled")
-        
+
         if st.button("🔄 New Session"):
             import uuid
             st.session_state.session_id = f"session-{uuid.uuid4().hex[:8]}"
@@ -723,33 +731,37 @@ def main():
             st.session_state.business_original_task = None
             st.session_state.business_collected_answers = {}
             st.rerun()
-        
+
         st.markdown("---")
         st.markdown("### Try Random Examples")
-        
+
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
-            code_remaining = len(EXAMPLE_POOL["code"]) + len(FALLBACK_EXAMPLES["code"]) - len(st.session_state.used_examples["code"])
+            code_remaining = len(EXAMPLE_POOL["code"]) + len(FALLBACK_EXAMPLES["code"]) - len(
+                st.session_state.used_examples["code"])
             if st.button(f"💻 ({code_remaining})", key="ex_code", help="Random code example"):
                 example = get_random_example("code")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "code"}
                     st.session_state.show_welcome = False
                     st.rerun()
-        
+
         with col2:
-            content_remaining = len(EXAMPLE_POOL["content"]) + len(FALLBACK_EXAMPLES["content"]) - len(st.session_state.used_examples["content"])
+            content_remaining = len(EXAMPLE_POOL["content"]) + len(FALLBACK_EXAMPLES["content"]) - len(
+                st.session_state.used_examples["content"])
             if st.button(f"📚 ({content_remaining})", key="ex_content", help="Random content example"):
                 example = get_random_example("content")
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "content"}
                     st.session_state.show_welcome = False
                     st.rerun()
-        
+
         with col3:
-            business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(st.session_state.used_examples["business"])
-            if st.button(f"📈 Demo ({business_remaining})", key="ex_business", help="Business diagnosis demo - shows complete Q&A flow"):
+            business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(
+                st.session_state.used_examples["business"])
+            if st.button(f"📈 Demo ({business_remaining})", key="ex_business",
+                         help="Business diagnosis demo - shows complete Q&A flow"):
                 example = get_random_example("business")
                 if example:
                     # Reset business Q&A state for fresh start
@@ -757,25 +769,23 @@ def main():
                     st.session_state.business_original_task = None
                     st.session_state.business_collected_answers = {}
                     st.session_state.business_answer_round = 0
-                    # Check if this example has a demo available
-                    if example in BUSINESS_DEMOS:
-                        st.session_state.pending_example = {"task": example, "type": "business_demo"}
-                    else:
-                        st.session_state.pending_example = {"task": example, "type": "business"}
+                    # ALWAYS use business_demo type - the API will generate demo dynamically
+                    # BUSINESS_DEMOS dict is only used as fallback if API fails
+                    st.session_state.pending_example = {"task": example, "type": "business_demo"}
                     st.session_state.show_welcome = False
                     st.rerun()
-        
+
         if any(st.session_state.using_fallback.values()):
             st.caption("🔄 Using extended pool")
-    
+
     # Main content
     st.title("💬 PeerAgent Chat")
     st.markdown("*Your intelligent multi-agent assistant*")
-    
+
     # Show welcome message if no messages yet
     if st.session_state.show_welcome and not st.session_state.messages:
         st.markdown(WELCOME_MESSAGE)
-    
+
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -783,33 +793,33 @@ def main():
                 st.markdown(message["content"])
             else:
                 render_response(message["content"])
-    
+
     # Handle pending example
     if "pending_example" in st.session_state:
         pending = st.session_state.pending_example
         del st.session_state.pending_example
-        
+
         task = pending["task"]
         example_type = pending["type"]
-        
+
         st.session_state.messages.append({"role": "user", "content": task})
-        
+
         # Handle business demo mode - shows complete automated Q&A flow
         if example_type == "business_demo":
-            # Check if demo is available
-            if task in BUSINESS_DEMOS:
-                with st.chat_message("assistant"):
-                    result = render_business_demo(task)
+            # ALWAYS call render_business_demo() - it handles API call and BUSINESS_DEMOS fallback
+            with st.chat_message("assistant"):
+                result = render_business_demo(task)
+            if result:
                 st.session_state.messages.append({"role": "assistant", "content": result})
-                st.rerun()
             else:
-                # No demo available - use regular interactive flow
+                # Demo generation completely failed - fall back to interactive flow
+                st.warning("Demo generation failed. Starting interactive Q&A flow instead.")
                 st.session_state.business_original_task = task
-                with st.spinner("🔄 Processing with business agent..."):
-                    result = send_task(task, "business")
+                result = send_task(task, "business")
                 st.session_state.messages.append({"role": "assistant", "content": result})
-                st.rerun()
-        
+            st.rerun()
+
+
         # Store original task if business type
         elif example_type == "business":
             st.session_state.business_original_task = task
@@ -817,22 +827,23 @@ def main():
                 result = send_task(task, "business")
             st.session_state.messages.append({"role": "assistant", "content": result})
             st.rerun()
-        
+
         else:
             with st.spinner(f"🔄 Processing with {example_type} agent..."):
                 agent_type_to_use = example_type if agent_mode == "Automatic" else agent_mode.lower()
                 result = send_task(task, agent_type_to_use)
             st.session_state.messages.append({"role": "assistant", "content": result})
             st.rerun()
-    
+
     # Chat input
-    if task := st.chat_input("Ask me anything..." if not st.session_state.business_questions else "Type your answers here..."):
+    if task := st.chat_input(
+            "Ask me anything..." if not st.session_state.business_questions else "Type your answers here..."):
         st.session_state.show_welcome = False
         st.session_state.messages.append({"role": "user", "content": task})
-        
+
         with st.chat_message("user"):
             st.markdown(task)
-        
+
         with st.chat_message("assistant"):
             # Check if we're in a business Q&A flow
             if st.session_state.business_questions:
@@ -843,21 +854,21 @@ def main():
             else:
                 with st.spinner("🔄 Processing..."):
                     agent_type = None if agent_mode == "Automatic" else agent_mode.lower()
-                    
+
                     # Store original task if business is selected or detected
                     if agent_type == "business":
                         st.session_state.business_original_task = task
-                    
+
                     result = send_task(task, agent_type)
-                    
+
                     # Check if result indicates business agent and store original task
                     if isinstance(result, dict):
                         res_agent = result.get("agent_type") or result.get("result", {}).get("agent_type")
                         if res_agent == "business_sense_agent":
                             st.session_state.business_original_task = task
-            
+
             render_response(result)
-        
+
         st.session_state.messages.append({"role": "assistant", "content": result})
         # Rerun to display messages from history only (prevents duplication)
         st.rerun()

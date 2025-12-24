@@ -22,7 +22,7 @@ class BusinessDiagnosis(BaseModel):
         ...,
         description="Business urgency level"
     )
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -61,7 +61,7 @@ class ProblemTree(BaseModel):
         default_factory=list,
         description="Structured list of root causes with sub-causes"
     )
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -96,7 +96,7 @@ class CodeOutput(BaseModel):
     code: str = Field(..., description="The generated code")
     language: str = Field(..., description="Programming language")
     explanation: str = Field(..., description="Explanation of the code")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -117,7 +117,7 @@ class ContentOutput(BaseModel):
         default_factory=list,
         description="List of source URLs used"
     )
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -142,7 +142,7 @@ class BusinessAgentQuestions(BaseModel):
     phase_emoji: Optional[str] = Field(default=None, description="Emoji indicator for the phase")
     round_number: Optional[int] = Field(default=None, description="Current questioning round (1, 2, 3...)")
     feedback: Optional[str] = Field(default=None, description="Feedback message if answer validation failed")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [

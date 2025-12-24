@@ -36,7 +36,7 @@ class TaskResponse(BaseModel):
     task_id: str = Field(..., description="Unique task identifier")
     status: TaskStatus = Field(default=TaskStatus.PENDING)
     message: str = Field(default="Task submitted successfully")
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
@@ -59,7 +59,7 @@ class TaskStatusResponse(BaseModel):
     agent_type: Optional[AgentType] = None
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    
+
     model_config = {
         "json_schema_extra": {
             "examples": [
