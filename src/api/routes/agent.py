@@ -7,7 +7,7 @@ Enhanced API routes with:
 - Comprehensive logging
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request, Query
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
@@ -439,15 +439,17 @@ async def execute_direct(
 
 @router.post(
     "/business/continue",
-    response_model=TaskResponse,
     summary="Continue Business Analysis",
-    description="Continue a business analysis session by providing answers to follow-up questions."
+    description="Continue a business analysis session by providing answers to follow-up questions. Returns result directly."
 )
 async def continue_business_analysis(
     body: BusinessQuestionInput,
     peer_agent: PeerAgent = Depends(get_peer_agent)
-) -> TaskResponse:
-    """Continue an ongoing business analysis with answers to questions."""
+) -> Dict[str, Any]:
+    """Continue an ongoing business analysis with answers to questions.
+    
+    Returns the result directly in the response body, no need to poll for status.
+    """
     if not body.answers:
         raise HTTPException(
             status_code=400,
@@ -469,11 +471,17 @@ async def continue_business_analysis(
                 previous_task = t.task
                 break
         
+        # Use original_task from request if provided, otherwise use from session
+        task_to_use = body.original_task or previous_task or "Continue analysis with provided answers"
+        
         result = await business_agent.execute(
-            task=previous_task or "Continue analysis with provided answers",
+            task=task_to_use,
             collected_answers=body.answers,
+            answer_rounds=body.answer_round,
             session_id=body.session_id,
-            task_id=task_id
+            task_id=task_id,
+            latest_answer=body.latest_answer,
+            previous_questions=body.previous_questions
         )
         
         # Properly serialize the result
@@ -484,7 +492,7 @@ async def continue_business_analysis(
             "data": result_data.model_dump() if hasattr(result_data, 'model_dump') else result_data
         }
         
-        # Store result
+        # Store result for session history
         task_data = TaskData(
             task_id=task_id,
             status=StoreStatus.COMPLETED,
@@ -496,11 +504,13 @@ async def continue_business_analysis(
         )
         task_store.create(task_data)
         
-        return TaskResponse(
-            task_id=task_id,
-            status=TaskStatus.COMPLETED,
-            message="Business analysis continued"
-        )
+        # Return result directly in response (no need to poll)
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "agent_type": "business_sense_agent",
+            "result": serialized_result
+        }
         
     except Exception as e:
         logger.error(f"Business continuation failed: {e}")

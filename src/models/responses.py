@@ -76,8 +76,37 @@ class TaskStatusResponse(BaseModel):
     }
 
 
+class BusinessContinueResponse(BaseModel):
+    """Response for business continuation - includes result directly."""
+    task_id: str = Field(..., description="Task identifier")
+    status: TaskStatus = Field(default=TaskStatus.COMPLETED)
+    agent_type: str = Field(default="business_sense_agent")
+    result: Dict[str, Any] = Field(..., description="The actual result data")
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "task_id": "task-abc123",
+                    "status": "completed",
+                    "agent_type": "business_sense_agent",
+                    "result": {
+                        "type": "questions",
+                        "data": {
+                            "questions": ["Question 1?", "Question 2?"],
+                            "phase": "clarify",
+                            "phase_emoji": "🎯"
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
     error: str
     detail: Optional[str] = None
     code: str = "UNKNOWN_ERROR"
+

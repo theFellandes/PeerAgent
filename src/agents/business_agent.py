@@ -230,33 +230,149 @@ Respond with a JSON object containing:
                 urgency_level="Medium"
             )
     
+    async def _validate_answers(
+        self,
+        task: str,
+        questions: List[str],
+        user_answer: str,
+        phase: str
+    ) -> Dict[str, Any]:
+        """
+        Validate if the user's answer is relevant and useful.
+        
+        Uses LLM to assess:
+        1. Is the answer related to the business problem?
+        2. Which questions were actually addressed?
+        3. Is there enough useful information to proceed?
+        
+        Returns:
+            {
+                "valid": bool,
+                "quality": "irrelevant" | "vague" | "partial" | "good",
+                "addressed_questions": list[int],  # indices of questions that were answered
+                "missing_info": list[str],  # what info is still needed
+                "feedback": str,  # message to show user
+                "can_proceed": bool  # whether we have enough to move on
+            }
+        """
+        validation_prompt = f"""You are evaluating whether a user's answer is relevant and useful for a business diagnosis session.
+
+## Original Business Problem
+{task}
+
+## Current Phase: {phase.upper()}
+
+## Questions Asked
+{chr(10).join(f'{i+1}. {q}' for i, q in enumerate(questions))}
+
+## User's Answer
+"{user_answer}"
+
+## Your Task
+Evaluate the answer and respond with a JSON object:
+
+{{
+    "valid": true/false (is this a genuine attempt to answer the business questions?),
+    "quality": "irrelevant" | "vague" | "partial" | "good",
+    "addressed_questions": [list of question numbers 1-3 that were addressed],
+    "missing_info": ["list of specific information still needed"],
+    "feedback": "A helpful message for the user",
+    "can_proceed": true/false (do we have enough to continue the analysis?)
+}}
+
+## Quality Guidelines
+- "irrelevant": Answer has nothing to do with the business problem (e.g., "weather is rainy")
+- "vague": Answer mentions the topic but lacks specifics (e.g., "things are bad")
+- "partial": Some questions answered but key info missing
+- "good": Most questions addressed with useful details
+
+Be strict but helpful. If the answer is irrelevant, can_proceed should be false."""
+
+        try:
+            response = await self.llm.ainvoke([
+                ("system", "You are an answer quality evaluator. Respond only with valid JSON."),
+                ("human", validation_prompt)
+            ])
+            
+            content = response.content
+            # Extract JSON from response
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            
+            result = json.loads(content.strip())
+            
+            # Ensure all required fields exist
+            return {
+                "valid": result.get("valid", True),
+                "quality": result.get("quality", "partial"),
+                "addressed_questions": result.get("addressed_questions", []),
+                "missing_info": result.get("missing_info", []),
+                "feedback": result.get("feedback", ""),
+                "can_proceed": result.get("can_proceed", True)
+            }
+            
+        except Exception as e:
+            self.logger.warning(f"Answer validation failed: {e}")
+            # Default to allowing progression if validation fails
+            return {
+                "valid": True,
+                "quality": "partial",
+                "addressed_questions": list(range(1, len(questions) + 1)),
+                "missing_info": [],
+                "feedback": "",
+                "can_proceed": True
+            }
+
+    
+    # Phase configuration with emojis
+    PHASE_CONFIG = {
+        "identify": {
+            "emoji": "🔍",
+            "title": "Problem Identification",
+            "description": "Understanding when, what, and why"
+        },
+        "clarify": {
+            "emoji": "🎯", 
+            "title": "Scope & Urgency",
+            "description": "Understanding who, consequences, and attempts"
+        },
+        "diagnose": {
+            "emoji": "🔬",
+            "title": "Root Cause Discovery", 
+            "description": "Understanding needs, data, and success criteria"
+        },
+        "complete": {
+            "emoji": "📊",
+            "title": "Diagnosis Complete",
+            "description": "Generating final analysis"
+        }
+    }
+    
     def _determine_next_phase(
         self,
-        collected_answers: Dict[str, str],
-        max_question_rounds: int = 3
+        answer_rounds: int,
+        max_rounds: int = 3
     ) -> Literal["identify", "clarify", "diagnose", "complete"]:
-        """Determine the next phase of questioning based on collected answers.
+        """Determine the next phase based on completed answer rounds.
+        
+        Each user response (regardless of how many questions it addresses) = 1 round.
         
         Phase progression:
-        - 0 answers: identify phase
-        - 1-3 answers: clarify phase  
-        - 4-6 answers: diagnose phase
-        - 7+ answers OR max rounds reached: complete (generate diagnosis)
+        - 0 rounds completed: identify phase (first questions)
+        - 1 round completed: clarify phase
+        - 2 rounds completed: diagnose phase  
+        - 3+ rounds completed: complete (generate diagnosis)
         """
-        num_answers = len(collected_answers)
-        
-        # Calculate how many rounds of questions have been answered
-        # (assuming ~3 questions per round)
-        rounds_completed = (num_answers + 2) // 3  # ceiling division
-        
-        if rounds_completed >= max_question_rounds:
+        if answer_rounds >= max_rounds:
             return "complete"
         
-        if num_answers == 0:
+        if answer_rounds == 0:
             return "identify"
-        elif num_answers <= 3:
+        elif answer_rounds == 1:
             return "clarify"
-        elif num_answers <= 6:
+        elif answer_rounds == 2:
             return "diagnose"
         else:
             return "complete"
@@ -266,43 +382,92 @@ Respond with a JSON object containing:
         self,
         task: str,
         collected_answers: Optional[Dict[str, str]] = None,
+        answer_rounds: int = 0,
         max_questions: int = 3,
         session_id: Optional[str] = None,
         task_id: Optional[str] = None,
         chat_history: Optional[List[BaseMessage]] = None,
+        latest_answer: Optional[str] = None,
+        previous_questions: Optional[List[str]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Execute business analysis with Socratic questioning.
         
         KEY BEHAVIOR:
-        - First call (no collected_answers): Returns questions to ask the user
-        - Subsequent calls (with collected_answers): Either returns more questions or final diagnosis
-        
-        This enables true multi-turn Socratic dialogue where the user must respond.
+        - First call (answer_rounds=0): Returns "identify" phase questions
+        - Subsequent calls (answer_rounds > 0): Validates answer then returns next questions or diagnosis
         
         Args:
             task: The business problem description
-            collected_answers: Previous Q&A pairs from the conversation (Dict[question, answer])
+            collected_answers: All Q&A pairs collected so far (Dict[question, answer])
+            answer_rounds: Number of times user has responded (each response = 1 round)
             max_questions: Maximum question rounds before forcing diagnosis (default 3)
             session_id: Session ID for tracking
             task_id: Task ID for tracking
             chat_history: Previous conversation messages for context
+            latest_answer: The most recent answer from user (for validation)
+            previous_questions: The questions that were asked (for validation)
             
         Returns:
             Dict with either:
-            - {"type": "questions", "data": BusinessAgentQuestions} - User should answer these
+            - {"type": "questions", "data": BusinessAgentQuestions} - User should answer
             - {"type": "diagnosis", "data": BusinessDiagnosis} - Final analysis
+            - {"type": "validation_failed", "data": {...}} - Answer was irrelevant
         """
         self.logger.info(f"BusinessSenseAgent executing: {task[:100]}...")
         collected_answers = collected_answers or {}
         
-        # Determine current phase based on answer count
-        current_phase = self._determine_next_phase(collected_answers, max_questions)
+        # Support legacy API: if collected_answers has items but answer_rounds=0,
+        # calculate rounds from answer count
+        if collected_answers and answer_rounds == 0:
+            # Assume each set of ~3 answers = 1 round (legacy behavior)
+            answer_rounds = max(1, len(collected_answers) // 3)
         
-        self.logger.info(f"Current phase: {current_phase}, answers collected: {len(collected_answers)}")
+        # === ANSWER VALIDATION ===
+        # If we have a new answer to validate, check it before proceeding
+        if latest_answer and previous_questions and answer_rounds > 0:
+            # Get the previous phase (the one we're validating answers for)
+            prev_phase = self._determine_next_phase(answer_rounds - 1, max_questions)
+            
+            self.logger.info(f"Validating answer for {prev_phase} phase...")
+            validation = await self._validate_answers(
+                task=task,
+                questions=previous_questions,
+                user_answer=latest_answer,
+                phase=prev_phase
+            )
+            
+            self.logger.info(f"Validation result: quality={validation['quality']}, can_proceed={validation['can_proceed']}")
+            
+            # If answer is irrelevant or too vague, stay in same phase
+            if not validation["can_proceed"]:
+                phase_config = self.PHASE_CONFIG.get(prev_phase, self.PHASE_CONFIG["identify"])
+                
+                # Generate feedback message
+                feedback_msg = validation["feedback"] or "Please provide more relevant information about your business situation."
+                
+                return {
+                    "type": "questions",
+                    "data": BusinessAgentQuestions(
+                        session_id=session_id or "default",
+                        questions=previous_questions,  # Re-ask the same questions
+                        category=f"Please clarify - {validation['quality']} answer",
+                        phase=prev_phase,
+                        phase_emoji="⚠️",  # Warning emoji for invalid
+                        round_number=answer_rounds,  # Don't increment round
+                        feedback=feedback_msg  # Add feedback field
+                    ),
+                    "validation": validation
+                }
         
-        # If we have enough information, generate diagnosis
+        # Determine current phase
+        current_phase = self._determine_next_phase(answer_rounds, max_questions)
+        phase_config = self.PHASE_CONFIG.get(current_phase, self.PHASE_CONFIG["identify"])
+        
+        self.logger.info(f"Phase: {phase_config['emoji']} {current_phase} (round {answer_rounds + 1})")
+        
+        # If complete, generate diagnosis
         if current_phase == "complete":
             self.logger.info("Generating final diagnosis...")
             diagnosis = await self._generate_diagnosis(task, collected_answers)
@@ -311,8 +476,8 @@ Respond with a JSON object containing:
                 "data": diagnosis
             }
         
-        # Otherwise, generate more questions for the current phase
-        self.logger.info(f"Generating questions for phase: {current_phase}")
+        # Generate questions for current phase
+        self.logger.info(f"Generating {current_phase} questions...")
         question_data = await self._generate_questions(task, current_phase, collected_answers)
         
         return {
@@ -320,7 +485,10 @@ Respond with a JSON object containing:
             "data": BusinessAgentQuestions(
                 session_id=session_id or "default",
                 questions=question_data["questions"],
-                category=question_data["category"]
+                category=question_data["category"],
+                phase=current_phase,
+                phase_emoji=phase_config["emoji"],
+                round_number=answer_rounds + 1
             )
         }
     
@@ -329,7 +497,7 @@ Respond with a JSON object containing:
         Get initial clarifying questions without starting full workflow.
         Useful for sync API to quickly return questions.
         """
-        result = await self.execute(task=task, session_id=session_id)
+        result = await self.execute(task=task, session_id=session_id, answer_rounds=0)
         
         if result["type"] == "questions":
             return result["data"]
@@ -342,5 +510,9 @@ Respond with a JSON object containing:
                 "What is the measurable impact on your business?",
                 "Is this currently in your top 3 priorities?"
             ],
-            category="problem_identification"
+            category="problem_identification",
+            phase="identify",
+            phase_emoji="🔍",
+            round_number=1
         )
+

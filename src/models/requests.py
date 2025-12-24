@@ -38,4 +38,10 @@ class TaskExecuteRequest(BaseModel):
 class BusinessQuestionInput(BaseModel):
     """Input for business agent follow-up questions."""
     session_id: str = Field(..., description="Session ID from initial request")
-    answers: Dict[str, str] = Field(..., description="Answers to the agent's questions")
+    answers: Dict[str, str] = Field(..., description="Answers to the agent's questions (can be all in one text)")
+    answer_round: int = Field(default=1, description="Current answer round number (increments each response)")
+    original_task: Optional[str] = Field(None, description="Original business problem statement")
+    latest_answer: Optional[str] = Field(None, description="The most recent answer text for validation")
+    previous_questions: Optional[List[str]] = Field(None, description="Previous questions to validate against")
+
+

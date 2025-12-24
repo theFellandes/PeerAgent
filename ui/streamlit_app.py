@@ -164,6 +164,8 @@ def init_session_state():
         st.session_state.business_original_task = None  # Original business problem
     if "business_collected_answers" not in st.session_state:
         st.session_state.business_collected_answers = {}  # Q&A history
+    if "business_answer_round" not in st.session_state:
+        st.session_state.business_answer_round = 0  # Current answer round
 
 
 def get_random_example(category: str) -> Optional[str]:
@@ -233,35 +235,53 @@ def send_task(task: str, agent_type: Optional[str] = None) -> dict:
         return {"error": str(e)}
 
 
-def send_business_continuation(original_task: str, answers: Dict[str, str]) -> dict:
-    """Send collected answers to continue business analysis."""
+def send_business_continuation(
+    original_task: str, 
+    answers: Dict[str, str], 
+    answer_round: int,
+    latest_answer: str = None,
+    previous_questions: List[str] = None
+) -> dict:
+    """Send collected answers to continue business analysis.
+    
+    The API validates the answer quality before proceeding.
+    If answer is irrelevant, it returns the same questions with feedback.
+    """
     try:
         endpoint = f"{API_URL}/v1/agent/business/continue"
         
+        payload = {
+            "session_id": st.session_state.session_id,
+            "answers": answers,
+            "answer_round": answer_round,
+            "original_task": original_task
+        }
+        
+        # Add validation params if provided
+        if latest_answer:
+            payload["latest_answer"] = latest_answer
+        if previous_questions:
+            payload["previous_questions"] = previous_questions
+        
         response = requests.post(
             endpoint,
-            json={
-                "session_id": st.session_state.session_id,
-                "answers": answers
-            },
+            json=payload,
             timeout=120
         )
         response.raise_for_status()
         result = response.json()
         
-        # Get the task status
-        task_id = result.get("task_id")
-        if task_id:
-            status_response = requests.get(
-                f"{API_URL}/v1/agent/status/{task_id}", 
-                timeout=30
-            )
-            if status_response.status_code == 200:
-                return status_response.json()
-        
+        # The API now returns result directly - no need to poll
+        # Response format: {task_id, status, agent_type, result: {...}}
         return result
+        
+    except requests.exceptions.ConnectionError:
+        return {"error": "Could not connect to API. Make sure the server is running."}
+    except requests.exceptions.Timeout:
+        return {"error": "Request timed out. Try again."}
     except Exception as e:
         return {"error": str(e)}
+
 
 
 def render_code_output(data: dict):
@@ -301,8 +321,27 @@ def render_business_output(data: dict):
     else:
         questions = []
     
+    # Get phase info from data
+    phase = output_data.get("phase") or data.get("phase", "")
+    phase_emoji = output_data.get("phase_emoji") or data.get("phase_emoji", "🤔")
+    round_number = output_data.get("round_number") or data.get("round_number", 1)
+    feedback = output_data.get("feedback") or data.get("feedback")
+    
     if output_type == "questions" or questions:
-        st.markdown("### 🤔 Clarifying Questions")
+        # Display phase header with emoji
+        phase_titles = {
+            "identify": "Problem Identification",
+            "clarify": "Scope & Urgency",
+            "diagnose": "Root Cause Discovery"
+        }
+        phase_title = phase_titles.get(phase, "Clarifying Questions")
+        
+        # Display feedback warning if validation failed
+        if feedback:
+            st.warning(f"⚠️ **Please provide more relevant information**\n\n{feedback}")
+            st.markdown("")
+        
+        st.markdown(f"### {phase_emoji} {phase_title} (Round {round_number}/3)")
         st.markdown("*Please answer these questions to help me better understand your situation:*")
         st.markdown("")
         for i, q in enumerate(questions, 1):
@@ -314,7 +353,7 @@ def render_business_output(data: dict):
         st.session_state.business_questions = questions
         
     elif output_type == "diagnosis" or "customer_stated_problem" in output_data:
-        st.markdown("### 📊 Business Diagnosis")
+        st.markdown("### 📊 Business Diagnosis Complete")
         st.markdown(f"**Customer Stated Problem:** {output_data.get('customer_stated_problem', 'N/A')}")
         st.markdown(f"**Identified Business Problem:** {output_data.get('identified_business_problem', 'N/A')}")
         st.markdown(f"**Hidden Root Risk:** {output_data.get('hidden_root_risk', 'N/A')}")
@@ -326,6 +365,7 @@ def render_business_output(data: dict):
         st.session_state.business_questions = None
         st.session_state.business_original_task = None
         st.session_state.business_collected_answers = {}
+        st.session_state.business_answer_round = 0  # Reset round counter
     else:
         st.json(output_data)
 
@@ -379,18 +419,45 @@ def render_response(result: dict):
 
 
 def handle_business_answer(user_input: str):
-    """Handle user's answer to business questions."""
+    """Handle user's answer to business questions.
+    
+    Each user response counts as ONE round, regardless of how many questions 
+    they address. The API validates answer quality - if irrelevant, we stay 
+    in the same round.
+    """
     if st.session_state.business_questions:
-        # Combine all current questions with the user's answer
+        # Store the previous questions for validation
+        previous_questions = st.session_state.business_questions.copy()
+        
+        # Tentatively increment round (will be reset if validation fails)
+        tentative_round = st.session_state.business_answer_round + 1
+        
+        # Store the user's combined answer for all pending questions
         combined_answer = user_input
         for q in st.session_state.business_questions:
             st.session_state.business_collected_answers[q] = combined_answer
         
-        # Continue the analysis with collected answers
+        # Continue the analysis with validation
         result = send_business_continuation(
-            st.session_state.business_original_task or "",
-            st.session_state.business_collected_answers
+            original_task=st.session_state.business_original_task or "",
+            answers=st.session_state.business_collected_answers,
+            answer_round=tentative_round,
+            latest_answer=user_input,
+            previous_questions=previous_questions
         )
+        
+        # Check if validation passed
+        if result and "result" in result:
+            result_data = result.get("result", {})
+            data_section = result_data.get("data", {})
+            
+            # If there's feedback, validation likely failed - don't increment round
+            if data_section.get("feedback"):
+                # Validation failed - keep same round
+                pass
+            else:
+                # Validation passed - commit the round increment
+                st.session_state.business_answer_round = tentative_round
         
         return result
     return None
@@ -448,6 +515,7 @@ def main():
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "code"}
                     st.session_state.show_welcome = False
+                    st.rerun()
         
         with col2:
             content_remaining = len(EXAMPLE_POOL["content"]) + len(FALLBACK_EXAMPLES["content"]) - len(st.session_state.used_examples["content"])
@@ -456,14 +524,21 @@ def main():
                 if example:
                     st.session_state.pending_example = {"task": example, "type": "content"}
                     st.session_state.show_welcome = False
+                    st.rerun()
         
         with col3:
             business_remaining = len(EXAMPLE_POOL["business"]) + len(FALLBACK_EXAMPLES["business"]) - len(st.session_state.used_examples["business"])
             if st.button(f"📈 ({business_remaining})", key="ex_business", help="Random business example"):
                 example = get_random_example("business")
                 if example:
+                    # Reset business Q&A state for fresh start
+                    st.session_state.business_questions = None
+                    st.session_state.business_original_task = None
+                    st.session_state.business_collected_answers = {}
+                    st.session_state.business_answer_round = 0
                     st.session_state.pending_example = {"task": example, "type": "business"}
                     st.session_state.show_welcome = False
+                    st.rerun()
         
         if any(st.session_state.using_fallback.values()):
             st.caption("🔄 Using extended pool")
@@ -539,6 +614,8 @@ def main():
             render_response(result)
         
         st.session_state.messages.append({"role": "assistant", "content": result})
+        # Rerun to display messages from history only (prevents duplication)
+        st.rerun()
 
 
 if __name__ == "__main__":
