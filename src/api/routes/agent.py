@@ -465,7 +465,7 @@ async def execute_direct(
     peer_agent: PeerAgent = Depends(get_peer_agent)
 ) -> Dict[str, Any]:
     """Execute a task with a specific agent type."""
-    valid_types = ["code", "content", "business", "problem"]
+    valid_types = ["code", "content", "business", "problem", "summary", "translate", "email", "data", "competitor"]
     
     if agent_type not in valid_types:
         raise HTTPException(

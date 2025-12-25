@@ -87,6 +87,41 @@ EXAMPLE_POOL = {
         "Supply chain costs are growing faster than revenue",
         "Customer satisfaction scores are declining despite new features",
         "Our startup is struggling to achieve product-market fit",
+    ],
+    "summary": [
+        "Summarize the key concepts of machine learning and its applications",
+        "Give me a brief summary of the benefits of microservices architecture",
+        "Summarize the main points of agile development methodology",
+        "Provide a TL;DR on cloud computing vs on-premise solutions",
+        "Summarize the key differences between SQL and NoSQL databases",
+    ],
+    "translate": [
+        "Translate to Spanish: Thank you for your interest in our product. We would be happy to schedule a demo.",
+        "Translate to French: Our company is committed to delivering high-quality software solutions.",
+        "Translate to German: Please find attached the project proposal for your review.",
+        "Translate to Turkish: We appreciate your business and look forward to working with you.",
+        "Translate to English: Merci de votre patience. Nous travaillons à résoudre ce problème.",
+    ],
+    "email": [
+        "Write a follow-up email to a client after a successful product demo",
+        "Draft a professional email requesting a meeting with stakeholders",
+        "Write an email to announce a new product feature to customers",
+        "Compose an email apologizing for a service outage and explaining next steps",
+        "Draft a cold outreach email for potential B2B clients",
+    ],
+    "data": [
+        "Analyze this quarterly data: Q1: $150k, Q2: $135k, Q3: $142k, Q4: $128k",
+        "What patterns do you see in: Users: Jan-100, Feb-150, Mar-180, Apr-165, May-200",
+        "Analyze employee productivity metrics: Mon-85%, Tue-92%, Wed-88%, Thu-78%, Fri-70%",
+        "Review conversion rates: Landing A: 3.2%, Landing B: 4.8%, Landing C: 2.1%",
+        "Analyze customer segments: Enterprise-45%, SMB-35%, Startup-20% with respective NPS scores",
+    ],
+    "competitor": [
+        "Analyze the competitive landscape for project management software",
+        "Compare Slack, Microsoft Teams, and Discord for enterprise communication",
+        "SWOT analysis for entering the e-commerce platform market",
+        "Analyze competitor strategies in the CRM software industry",
+        "Research competitor pricing strategies for SaaS productivity tools",
     ]
 }
 
@@ -593,6 +628,211 @@ def render_content_output(data: dict):
             st.markdown(f"{i}. [{source}]({source})")
 
 
+def render_summary_output(data: dict):
+    """Render summary agent output with nice formatting."""
+    st.markdown("## 📝 Summary")
+    
+    # TL;DR
+    tldr = data.get("tldr", "")
+    if tldr:
+        st.success(f"**TL;DR:** {tldr}")
+    
+    # Key Points
+    key_points = data.get("key_points", [])
+    if key_points:
+        st.markdown("### Key Points")
+        for point in key_points:
+            st.markdown(f"• {point}")
+    
+    # Details
+    details = data.get("details", "")
+    if details:
+        st.markdown("### Additional Details")
+        st.info(details)
+    
+    # Word count reduction
+    reduction = data.get("word_count_reduction", "")
+    if reduction:
+        st.caption(f"📊 Reduced word count by approximately {reduction}%")
+
+
+def render_translation_output(data: dict):
+    """Render translation agent output with nice formatting."""
+    st.markdown("## 🌐 Translation")
+    
+    source_lang = data.get("source_language", "Unknown")
+    target_lang = data.get("target_language", "Unknown")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(f"**From:** {source_lang}")
+        original = data.get("original_text", "")
+        if original:
+            st.text_area("Original Text", original, height=100, disabled=True)
+    
+    with col2:
+        st.markdown(f"**To:** {target_lang}")
+        translated = data.get("translated_text", "")
+        if translated:
+            st.text_area("Translated Text", translated, height=100, disabled=True)
+    
+    notes = data.get("notes", "")
+    if notes:
+        st.info(f"📌 **Translation Notes:** {notes}")
+
+
+def render_email_output(data: dict):
+    """Render email agent output with nice formatting."""
+    st.markdown("## ✉️ Professional Email Draft")
+    
+    # Subject
+    subject = data.get("subject", "")
+    if subject:
+        st.markdown(f"**Subject:** {subject}")
+    
+    tone = data.get("tone", "professional")
+    st.caption(f"Tone: {tone.title()}")
+    
+    st.markdown("---")
+    
+    # Full email in a nice box
+    full_email = data.get("full_email", "")
+    if full_email:
+        st.markdown(full_email)
+    else:
+        # Build from parts
+        greeting = data.get("greeting", "")
+        body = data.get("body", "")
+        closing = data.get("closing", "")
+        signature = data.get("signature", "")
+        
+        if greeting:
+            st.markdown(greeting)
+        if body:
+            st.markdown(body)
+        if closing:
+            st.markdown(closing)
+        if signature:
+            st.markdown(f"*{signature}*")
+    
+    # Tips
+    tips = data.get("tips", "")
+    if tips:
+        st.markdown("---")
+        st.info(f"💡 **Tips:** {tips}")
+
+
+def render_data_output(data: dict):
+    """Render data analysis agent output with nice formatting."""
+    st.markdown("## 📊 Data Analysis")
+    
+    # Overview
+    overview = data.get("data_overview", "")
+    if overview:
+        st.info(f"**Overview:** {overview}")
+    
+    # Key Statistics
+    stats = data.get("key_statistics", {})
+    if stats:
+        st.markdown("### Key Statistics")
+        if isinstance(stats, dict):
+            for key, value in stats.items():
+                st.metric(key, value)
+        else:
+            st.write(stats)
+    
+    # Patterns
+    patterns = data.get("patterns_found", [])
+    if patterns:
+        st.markdown("### Patterns Found")
+        for pattern in patterns:
+            st.markdown(f"🔍 {pattern}")
+    
+    # Insights
+    insights = data.get("insights", [])
+    if insights:
+        st.markdown("### Key Insights")
+        for insight in insights:
+            st.markdown(f"💡 {insight}")
+    
+    # Recommendations
+    recommendations = data.get("recommendations", [])
+    if recommendations:
+        st.markdown("### Recommendations")
+        for rec in recommendations:
+            st.markdown(f"✅ {rec}")
+    
+    # Data quality
+    quality = data.get("data_quality", "")
+    if quality:
+        quality_colors = {"good": "🟢", "fair": "🟡", "poor": "🔴"}
+        icon = quality_colors.get(quality.lower(), "⚪")
+        st.caption(f"Data Quality: {icon} {quality.title()}")
+
+
+def render_competitor_output(data: dict):
+    """Render competitor analysis agent output with nice formatting."""
+    st.markdown("## 🔍 Competitor Analysis")
+    
+    # Market Overview
+    overview = data.get("market_overview", "")
+    if overview:
+        st.info(f"**Market Overview:** {overview}")
+    
+    # Competitors
+    competitors = data.get("competitors", [])
+    if competitors:
+        st.markdown("### Competitors")
+        for comp in competitors:
+            if isinstance(comp, dict):
+                name = comp.get("name", "Unknown")
+                with st.expander(f"📌 {name}"):
+                    if comp.get("description"):
+                        st.write(comp["description"])
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Strengths:**")
+                        for s in comp.get("strengths", []):
+                            st.markdown(f"✅ {s}")
+                    with col2:
+                        st.markdown("**Weaknesses:**")
+                        for w in comp.get("weaknesses", []):
+                            st.markdown(f"⚠️ {w}")
+            else:
+                st.markdown(f"• {comp}")
+    
+    # Opportunities
+    opportunities = data.get("opportunities", [])
+    if opportunities:
+        st.markdown("### Opportunities")
+        for opp in opportunities:
+            st.markdown(f"🎯 {opp}")
+    
+    # Threats
+    threats = data.get("threats", [])
+    if threats:
+        st.markdown("### Threats")
+        for threat in threats:
+            st.markdown(f"⚡ {threat}")
+    
+    # Recommendations
+    recommendations = data.get("recommendations", [])
+    if recommendations:
+        st.markdown("### Strategic Recommendations")
+        for rec in recommendations:
+            st.success(f"💡 {rec}")
+    
+    # Sources
+    sources = data.get("sources", [])
+    if sources:
+        st.markdown("---")
+        st.markdown("**Sources:**")
+        for source in sources:
+            st.markdown(f"• {source}")
+
+
 def render_problem_tree_output(data: dict):
     """Render problem tree output from message history."""
     tree_data = data.get("result", data)
@@ -849,7 +1089,12 @@ def render_response(result: dict):
         "content_agent": "📚 Content Agent",
         "business_sense_agent": "📈 Business Agent",
         "problem_structuring_agent": "🌳 Problem Structuring Agent",
-        "peer_agent": "🤖 Peer Agent"
+        "peer_agent": "🤖 Peer Agent",
+        "summary_agent": "📝 Summary Agent",
+        "translation_agent": "🌐 Translation Agent",
+        "email_agent": "✉️ Email Agent",
+        "data_analysis_agent": "📊 Data Analysis Agent",
+        "competitor_agent": "🔍 Competitor Agent"
     }
     st.markdown(f"*{agent_names.get(agent_type, str(agent_type))}*")
 
@@ -866,6 +1111,16 @@ def render_response(result: dict):
     elif agent_type == "problem_structuring_agent":
         # Render problem tree from message history
         render_problem_tree_output(data)
+    elif agent_type == "summary_agent":
+        render_summary_output(data)
+    elif agent_type == "translation_agent":
+        render_translation_output(data)
+    elif agent_type == "email_agent":
+        render_email_output(data)
+    elif agent_type == "data_analysis_agent":
+        render_data_output(data)
+    elif agent_type == "competitor_agent":
+        render_competitor_output(data)
     else:
         if "code" in data:
             render_code_output(data)
@@ -875,6 +1130,16 @@ def render_response(result: dict):
             render_business_output(data)
         elif "problem_tree" in data:
             render_problem_tree_output(data)
+        elif "tldr" in data or "key_points" in data:
+            render_summary_output(data)
+        elif "translated_text" in data:
+            render_translation_output(data)
+        elif "full_email" in data or "subject" in data:
+            render_email_output(data)
+        elif "insights" in data or "recommendations" in data:
+            render_data_output(data)
+        elif "competitors" in data or "market_overview" in data:
+            render_competitor_output(data)
         else:
             st.json(data)
 
@@ -1019,6 +1284,51 @@ def main():
             # Pick a random problem tree example
             tree_example = random.choice(PROBLEM_TREE_EXAMPLES)
             st.session_state.pending_example = {"task": tree_example, "type": "problem_tree"}
+            st.session_state.show_welcome = False
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 📚 Additional Agents")
+        st.caption("Try more specialized agents")
+        
+        # Row 1: Summary and Translation
+        col_s1, col_s2 = st.columns(2)
+        
+        with col_s1:
+            if st.button("📝 Summary", key="ex_summary", help="Text summarization"):
+                example = random.choice(EXAMPLE_POOL.get("summary", ["Summarize AI concepts"]))
+                st.session_state.pending_example = {"task": example, "type": "summary"}
+                st.session_state.show_welcome = False
+                st.rerun()
+        
+        with col_s2:
+            if st.button("🌐 Translate", key="ex_translate", help="Multi-language translation"):
+                example = random.choice(EXAMPLE_POOL.get("translate", ["Translate to Spanish: Hello"]))
+                st.session_state.pending_example = {"task": example, "type": "translate"}
+                st.session_state.show_welcome = False
+                st.rerun()
+        
+        # Row 2: Email and Data
+        col_e1, col_e2 = st.columns(2)
+        
+        with col_e1:
+            if st.button("✉️ Email", key="ex_email", help="Professional email drafting"):
+                example = random.choice(EXAMPLE_POOL.get("email", ["Write a follow-up email"]))
+                st.session_state.pending_example = {"task": example, "type": "email"}
+                st.session_state.show_welcome = False
+                st.rerun()
+        
+        with col_e2:
+            if st.button("📊 Data", key="ex_data", help="Data analysis"):
+                example = random.choice(EXAMPLE_POOL.get("data", ["Analyze this data"]))
+                st.session_state.pending_example = {"task": example, "type": "data"}
+                st.session_state.show_welcome = False
+                st.rerun()
+        
+        # Row 3: Competitor (full width)
+        if st.button("🔍 Competitor Analysis", key="ex_competitor", help="Competitor research and SWOT"):
+            example = random.choice(EXAMPLE_POOL.get("competitor", ["Analyze competitors"]))
+            st.session_state.pending_example = {"task": example, "type": "competitor"}
             st.session_state.show_welcome = False
             st.rerun()
 

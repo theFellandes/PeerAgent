@@ -33,6 +33,20 @@ LangGraph is a library for building stateful, multi-actor applications with LLMs
 | **Graph-based Workflows** | Define complex agent interactions as nodes and edges |
 | **Persistence** | Save and restore state across sessions |
 
+### Mermaid Flow Diagrams
+
+#### PeerAgent Routing Flow
+
+![AgentRouting-2025-12-25-080054.png](graphs/AgentRouting-2025-12-25-080054.png)
+
+#### BusinessSenseAgent Socratic Flow
+
+![AgentRouting-2025-12-25-080801.png](graphs/AgentRouting-2025-12-25-080801.png)
+
+#### Problem Tree Structure
+
+![AgentRouting-2025-12-25-080839.png](graphs/AgentRouting-2025-12-25-080839.png)
+
 ---
 
 ## Technical Requirements Overview
