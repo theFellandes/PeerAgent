@@ -36,6 +36,15 @@ I'm your intelligent multi-agent assistant. I can help you with:
 """
 
 # Example pool aligned with PDF guidelines - focused on technical test scenarios
+# Problem Tree specific examples (for direct Problem Tree demo)
+PROBLEM_TREE_EXAMPLES = [
+    "Our sales have declined 20% year-over-year",
+    "Customer complaints have increased significantly",
+    "Market share is being lost to competitors",
+    "Operational costs are growing faster than revenue",
+    "Employee productivity has dropped after hybrid work",
+]
+
 EXAMPLE_POOL = {
     "code": [
         # Multi-language support examples
@@ -359,6 +368,81 @@ def send_business_continuation(
         return {"error": str(e)}
 
 
+def render_problem_tree_demo(task: str) -> Optional[dict]:
+    """Render a Problem Tree directly from a business problem description.
+    
+    Calls the /business/problem-tree API to generate a structured analysis
+    showing problem type, root causes, and sub-causes (MECE structure).
+    """
+    try:
+        endpoint = f"{API_URL}/v1/agent/business/problem-tree"
+        with st.spinner("🌳 Generating Problem Tree... (Analyzing root causes)"):
+            response = requests.post(
+                endpoint,
+                json={"task": task, "session_id": st.session_state.session_id},
+                timeout=60
+            )
+            response.raise_for_status()
+            result = response.json()
+    except Exception as e:
+        st.error(f"⚠️ Problem tree generation failed: {e}")
+        return None
+    
+    # Extract problem tree data
+    tree_result = result.get("result", {})
+    problem_tree = tree_result.get("problem_tree", {})
+    
+    if not problem_tree:
+        st.error("No problem tree generated")
+        return None
+    
+    # Display the Problem Tree
+    st.markdown("## 🌳 Problem Tree Analysis")
+    st.info(f"**Business Problem:** {task}")
+    st.markdown("---")
+    
+    # Problem Type with icon
+    problem_type = problem_tree.get("problem_type", "Unknown")
+    type_icons = {
+        "Growth": "📈", "Cost": "💰", "Operational": "⚙️",
+        "Technology": "💻", "Regulation": "📋", "Organizational": "👥"
+    }
+    type_icon = type_icons.get(problem_type, "📊")
+    st.markdown(f"### {type_icon} Problem Type: **{problem_type}**")
+    
+    # Main Problem
+    st.markdown(f"### 🎯 Main Problem")
+    st.markdown(f"> {problem_tree.get('main_problem', 'N/A')}")
+    
+    # Root Causes Tree Structure
+    root_causes = problem_tree.get("root_causes", [])
+    if root_causes:
+        st.markdown("---")
+        st.markdown("### 🌿 Root Causes & Sub-Causes (MECE Structure)")
+        st.markdown("*Mutually Exclusive, Collectively Exhaustive*")
+        st.markdown("")
+        
+        for i, cause in enumerate(root_causes, 1):
+            cause_text = cause.get("cause", cause) if isinstance(cause, dict) else str(cause)
+            st.markdown(f"#### {i}. {cause_text}")
+            
+            sub_causes = cause.get("sub_causes", []) if isinstance(cause, dict) else []
+            if sub_causes:
+                for sub in sub_causes:
+                    st.markdown(f"   - {sub}")
+            st.markdown("")
+    
+    # Return result for message history
+    return {
+        "agent_type": "problem_structuring_agent",
+        "result": {
+            "type": "problem_tree",
+            "problem_description": task,
+            "problem_tree": problem_tree
+        }
+    }
+
+
 def render_business_demo(task: str) -> Optional[dict]:
     """Render a complete business demo with simulated Q&A flow.
 
@@ -435,15 +519,41 @@ def render_business_demo(task: str) -> Optional[dict]:
         st.success(f"💬 \"{answer}\"")
         st.markdown("")
 
-    # Display diagnosis
+    # Display diagnosis (Output 1)
     st.markdown("---")
-    st.markdown("### 📊 Business Diagnosis Complete")
+    st.markdown("## 📊 Output 1: Business Diagnosis")
     st.markdown(f"**Customer Stated Problem:** {diagnosis.get('customer_stated_problem', task)}")
     st.markdown(f"**Identified Business Problem:** {diagnosis.get('identified_business_problem', 'N/A')}")
     st.markdown(f"**Hidden Root Risk:** {diagnosis.get('hidden_root_risk', 'N/A')}")
     urgency = diagnosis.get("urgency_level", "Medium")
     urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
     st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
+
+    # Display problem tree (Output 2)
+    problem_tree = demo_result.get("problem_tree", {})
+    if problem_tree:
+        st.markdown("---")
+        st.markdown("## 🌳 Output 2: Problem Structure (MECE Tree)")
+
+        problem_type = problem_tree.get("problem_type", "Unknown")
+        type_icons = {
+            "Growth": "📈", "Cost": "💰", "Operational": "⚙️",
+            "Technology": "💻", "Regulation": "📋", "Organizational": "👥"
+        }
+        type_icon = type_icons.get(problem_type, "📊")
+        st.markdown(f"**Problem Type:** {type_icon} {problem_type}")
+        st.markdown(f"**Main Problem:** {problem_tree.get('main_problem', 'N/A')}")
+
+        # Render Problem Tree structure
+        root_causes = problem_tree.get("root_causes", [])
+        if root_causes:
+            st.markdown("### Root Causes & Sub-Causes:")
+            for i, cause in enumerate(root_causes, 1):
+                cause_text = cause.get("cause", cause) if isinstance(cause, dict) else str(cause)
+                st.markdown(f"**{i}. {cause_text}**")
+                sub_causes = cause.get("sub_causes", []) if isinstance(cause, dict) else []
+                for sub in sub_causes:
+                    st.markdown(f"   - {sub}")
 
     # Return a formatted result for the messages
     return {
@@ -453,7 +563,8 @@ def render_business_demo(task: str) -> Optional[dict]:
             "type": "demo",
             "task": task,
             "rounds": rounds,
-            "diagnosis": diagnosis
+            "diagnosis": diagnosis,
+            "problem_tree": problem_tree
         }
     }
 
@@ -480,6 +591,50 @@ def render_content_output(data: dict):
         st.markdown("**Sources:**")
         for i, source in enumerate(sources, 1):
             st.markdown(f"{i}. [{source}]({source})")
+
+
+def render_problem_tree_output(data: dict):
+    """Render problem tree output from message history."""
+    tree_data = data.get("result", data)
+    problem_tree = tree_data.get("problem_tree", data.get("problem_tree", {}))
+    problem_desc = tree_data.get("problem_description", "")
+    
+    if not problem_tree:
+        st.json(data)
+        return
+    
+    # Display the Problem Tree
+    st.markdown("## 🌳 Problem Tree Analysis")
+    if problem_desc:
+        st.info(f"**Business Problem:** {problem_desc}")
+    st.markdown("---")
+    
+    # Problem Type with icon
+    problem_type = problem_tree.get("problem_type", "Unknown")
+    type_icons = {
+        "Growth": "📈", "Cost": "💰", "Operational": "⚙️",
+        "Technology": "💻", "Regulation": "📋", "Organizational": "👥"
+    }
+    type_icon = type_icons.get(problem_type, "📊")
+    st.markdown(f"### {type_icon} Problem Type: **{problem_type}**")
+    
+    # Main Problem
+    st.markdown(f"### 🎯 Main Problem")
+    st.markdown(f"> {problem_tree.get('main_problem', 'N/A')}")
+    
+    # Root Causes Tree Structure
+    root_causes = problem_tree.get("root_causes", [])
+    if root_causes:
+        st.markdown("---")
+        st.markdown("### 🌿 Root Causes & Sub-Causes")
+        
+        for i, cause in enumerate(root_causes, 1):
+            cause_text = cause.get("cause", cause) if isinstance(cause, dict) else str(cause)
+            st.markdown(f"**{i}. {cause_text}**")
+            
+            sub_causes = cause.get("sub_causes", []) if isinstance(cause, dict) else []
+            for sub in sub_causes:
+                st.markdown(f"   - {sub}")
 
 
 def render_business_output(data: dict):
@@ -526,6 +681,131 @@ def render_business_output(data: dict):
         # Store questions for answer collection
         st.session_state.business_questions = questions
 
+    # IMPORTANT: Check for demo FIRST before full_analysis (demos have diagnosis + problem_tree)
+    elif output_type == "demo" or data.get("demo_mode") or ("rounds" in output_data and len(output_data.get("rounds", [])) > 0):
+        # Render demo with Q&A phases
+        demo_result = data.get("result", {}) if "result" in data else output_data
+        task = demo_result.get("task", "") or output_data.get("task", "")
+        rounds = demo_result.get("rounds", []) or output_data.get("rounds", [])
+        diagnosis = demo_result.get("diagnosis", {}) or output_data.get("diagnosis", {})
+        problem_tree = demo_result.get("problem_tree", {}) or output_data.get("problem_tree", {})
+
+        if rounds:
+            st.markdown("### 📋 Demo: Socratic Questioning Flow")
+            st.info(f"**Problem:** {task}")
+            st.markdown("---")
+            st.markdown("*Below is a demonstration of how the AI diagnoses business problems through questioning:*")
+            st.markdown("")
+
+            phase_titles = {
+                "identify": "Problem Identification",
+                "clarify": "Scope & Urgency",
+                "diagnose": "Root Cause Discovery"
+            }
+
+            # Display each Q&A round
+            for i, round_data in enumerate(rounds, 1):
+                phase = round_data.get("phase", f"phase_{i}")
+                emoji = round_data.get("phase_emoji", "🔍")
+                questions_list = round_data.get("questions", [])
+                answer = round_data.get("answer", "")
+
+                phase_title = phase_titles.get(phase, phase.title() if phase else f"Phase {i}")
+
+                st.markdown(f"### {emoji} Phase {i}: {phase_title}")
+                st.markdown("**Agent asks:**")
+                for j, q in enumerate(questions_list, 1):
+                    st.markdown(f"  {j}. *{q}*")
+
+                st.markdown("")
+                st.markdown("**Simulated user responds:**")
+                st.success(f'💬 "{answer}"')
+                st.markdown("")
+
+            # Display diagnosis (Output 1) after Q&A
+            if diagnosis:
+                st.markdown("---")
+                st.markdown("## 📊 Output 1: Business Diagnosis")
+                st.markdown(f"**Customer Stated Problem:** {diagnosis.get('customer_stated_problem', task)}")
+                st.markdown(f"**Identified Business Problem:** {diagnosis.get('identified_business_problem', 'N/A')}")
+                st.markdown(f"**Hidden Root Risk:** {diagnosis.get('hidden_root_risk', 'N/A')}")
+                urgency = diagnosis.get("urgency_level", "Medium")
+                urgency_colors = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}
+                urgency_color = urgency_colors.get(urgency, "🟡")
+                st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
+
+            # Display problem tree (Output 2) after diagnosis
+            if problem_tree:
+                st.markdown("---")
+                st.markdown("## 🌳 Output 2: Problem Structure (MECE Tree)")
+
+                problem_type = problem_tree.get("problem_type", "Unknown")
+                type_icons = {
+                    "Growth": "📈", "Cost": "💰", "Operational": "⚙️",
+                    "Technology": "💻", "Regulation": "📋", "Organizational": "👥"
+                }
+                type_icon = type_icons.get(problem_type, "📊")
+                st.markdown(f"**Problem Type:** {type_icon} {problem_type}")
+                st.markdown(f"**Main Problem:** {problem_tree.get('main_problem', 'N/A')}")
+
+                root_causes = problem_tree.get("root_causes", [])
+                if root_causes:
+                    st.markdown("### Root Causes & Sub-Causes:")
+                    for i, cause in enumerate(root_causes, 1):
+                        cause_text = cause.get("cause", cause) if isinstance(cause, dict) else str(cause)
+                        st.markdown(f"**{i}. {cause_text}**")
+                        sub_causes = cause.get("sub_causes", []) if isinstance(cause, dict) else []
+                        for sub in sub_causes:
+                            st.markdown(f"   - {sub}")
+        else:
+            st.warning("Demo data is incomplete - no Q&A rounds found")
+            st.json(output_data)
+
+    elif output_type == "full_analysis" or (("diagnosis" in output_data and "problem_tree" in output_data) and "rounds" not in output_data):
+        # Full business analysis with both outputs per PDF requirements
+        diagnosis = output_data.get("diagnosis", {})
+        problem_tree = output_data.get("problem_tree", {})
+
+        # === OUTPUT 1: Business Diagnosis ===
+        st.markdown("---")
+        st.markdown("## 📊 Output 1: Business Diagnosis")
+        st.markdown(f"**Customer Stated Problem:** {diagnosis.get('customer_stated_problem', 'N/A')}")
+        st.markdown(f"**Identified Business Problem:** {diagnosis.get('identified_business_problem', 'N/A')}")
+        st.markdown(f"**Hidden Root Risk:** {diagnosis.get('hidden_root_risk', 'N/A')}")
+        urgency = diagnosis.get("urgency_level", "Medium")
+        urgency_color = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}.get(urgency, "🟡")
+        st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
+
+        # === OUTPUT 2: Problem Structure ===
+        st.markdown("---")
+        st.markdown("## 🌳 Output 2: Problem Structure (MECE Tree)")
+
+        problem_type = problem_tree.get("problem_type", "Unknown")
+        type_icons = {
+            "Growth": "📈", "Cost": "💰", "Operational": "⚙️",
+            "Technology": "💻", "Regulation": "📋", "Organizational": "👥"
+        }
+        type_icon = type_icons.get(problem_type, "📊")
+        st.markdown(f"**Problem Type:** {type_icon} {problem_type}")
+        st.markdown(f"**Main Problem:** {problem_tree.get('main_problem', 'N/A')}")
+
+        # Render Problem Tree structure
+        root_causes = problem_tree.get("root_causes", [])
+        if root_causes:
+            st.markdown("### Root Causes & Sub-Causes:")
+            for i, cause in enumerate(root_causes, 1):
+                cause_text = cause.get("cause", cause) if isinstance(cause, dict) else str(cause)
+                st.markdown(f"**{i}. {cause_text}**")
+                sub_causes = cause.get("sub_causes", []) if isinstance(cause, dict) else []
+                for sub in sub_causes:
+                    st.markdown(f"   - {sub}")
+
+        # Clear business Q&A state after full analysis
+        st.session_state.business_questions = None
+        st.session_state.business_original_task = None
+        st.session_state.business_collected_answers = {}
+        st.session_state.business_answer_round = 0
+
     elif output_type == "diagnosis" or "customer_stated_problem" in output_data:
         st.markdown("### 📊 Business Diagnosis Complete")
         st.markdown(f"**Customer Stated Problem:** {output_data.get('customer_stated_problem', 'N/A')}")
@@ -541,60 +821,6 @@ def render_business_output(data: dict):
         st.session_state.business_collected_answers = {}
         st.session_state.business_answer_round = 0  # Reset round counter
 
-    elif output_type == "demo" or data.get("demo_mode"):
-        # Re-render the demo from stored data (works for API-generated OR hardcoded demos)
-        # Extract the demo data from wherever it's stored in the result
-        demo_result = data.get("result", {}) if "result" in data else output_data
-        task = demo_result.get("task", "") or output_data.get("task", "")
-        rounds = demo_result.get("rounds", []) or output_data.get("rounds", [])
-        diagnosis = demo_result.get("diagnosis", {}) or output_data.get("diagnosis", {})
-
-        if rounds:
-            st.markdown("### 📋 Demo: Socratic Questioning Flow")
-            st.info(f"**Problem:** {task}")
-            st.markdown("---")
-            st.markdown("*Below is a demonstration of how the AI diagnoses business problems through questioning:*")
-            st.markdown("")
-
-            phase_titles = {
-                "identify": "Problem Identification",
-                "clarify": "Scope & Urgency",
-                "diagnose": "Root Cause Discovery"
-            }
-
-            # Display each round
-            for i, round_data in enumerate(rounds, 1):
-                phase = round_data.get("phase", f"phase_{i}")
-                emoji = round_data.get("phase_emoji", "🔍")
-                questions = round_data.get("questions", [])
-                answer = round_data.get("answer", "")
-
-                phase_title = phase_titles.get(phase, phase.title() if phase else f"Phase {i}")
-
-                st.markdown(f"### {emoji} Phase {i}: {phase_title}")
-                st.markdown("**Agent asks:**")
-                for j, q in enumerate(questions, 1):
-                    st.markdown(f"  {j}. *{q}*")
-
-                st.markdown("")
-                st.markdown("**Simulated user responds:**")
-                st.success(f'💬 "{answer}"')
-                st.markdown("")
-
-            # Display diagnosis
-            if diagnosis:
-                st.markdown("---")
-                st.markdown("### 📊 Business Diagnosis Complete")
-                st.markdown(f"**Customer Stated Problem:** {diagnosis.get('customer_stated_problem', task)}")
-                st.markdown(f"**Identified Business Problem:** {diagnosis.get('identified_business_problem', 'N/A')}")
-                st.markdown(f"**Hidden Root Risk:** {diagnosis.get('hidden_root_risk', 'N/A')}")
-                urgency = diagnosis.get("urgency_level", "Medium")
-                urgency_colors = {"Low": "🟢", "Medium": "🟡", "Critical": "🔴"}
-                urgency_color = urgency_colors.get(urgency, "🟡")
-                st.markdown(f"**Urgency Level:** {urgency_color} {urgency}")
-        else:
-            st.warning("Demo data is incomplete - no Q&A rounds found")
-            st.json(output_data)
     else:
         st.json(output_data)
 
@@ -622,6 +848,7 @@ def render_response(result: dict):
         "code_agent": "💻 Code Agent",
         "content_agent": "📚 Content Agent",
         "business_sense_agent": "📈 Business Agent",
+        "problem_structuring_agent": "🌳 Problem Structuring Agent",
         "peer_agent": "🤖 Peer Agent"
     }
     st.markdown(f"*{agent_names.get(agent_type, str(agent_type))}*")
@@ -636,6 +863,9 @@ def render_response(result: dict):
         render_content_output(data)
     elif agent_type == "business_sense_agent":
         render_business_output(data)
+    elif agent_type == "problem_structuring_agent":
+        # Render problem tree from message history
+        render_problem_tree_output(data)
     else:
         if "code" in data:
             render_code_output(data)
@@ -643,6 +873,8 @@ def render_response(result: dict):
             render_content_output(data)
         elif "customer_stated_problem" in data or "questions" in data or "type" in data:
             render_business_output(data)
+        elif "problem_tree" in data:
+            render_problem_tree_output(data)
         else:
             st.json(data)
 
@@ -778,6 +1010,18 @@ def main():
         if any(st.session_state.using_fallback.values()):
             st.caption("🔄 Using extended pool")
 
+        st.markdown("---")
+        st.markdown("### 🌳 Problem Tree Demo")
+        st.caption("See structured problem analysis")
+        
+        if st.button("🌳 Generate Problem Tree", key="problem_tree_demo",
+                     help="Generate a Problem Tree directly - shows MECE root cause analysis"):
+            # Pick a random problem tree example
+            tree_example = random.choice(PROBLEM_TREE_EXAMPLES)
+            st.session_state.pending_example = {"task": tree_example, "type": "problem_tree"}
+            st.session_state.show_welcome = False
+            st.rerun()
+
     # Main content
     st.title("💬 PeerAgent Chat")
     st.markdown("*Your intelligent multi-agent assistant*")
@@ -819,6 +1063,15 @@ def main():
                 st.session_state.messages.append({"role": "assistant", "content": result})
             st.rerun()
 
+        # Handle problem tree demo - direct visualization of MECE structure
+        elif example_type == "problem_tree":
+            with st.chat_message("assistant"):
+                result = render_problem_tree_demo(task)
+            if result:
+                st.session_state.messages.append({"role": "assistant", "content": result})
+            else:
+                st.error("Problem tree generation failed")
+            st.rerun()
 
         # Store original task if business type
         elif example_type == "business":

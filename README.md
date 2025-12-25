@@ -15,6 +15,7 @@
 
 - [What's New in v2.0](#-whats-new-in-v20)
 - [Overview](#-overview)
+- [Live Demos](#-live-demos)
 - [Architecture](#-architecture)
 - [Quick Start](#-quick-start)
 - [Agents](#-agents)
@@ -78,6 +79,63 @@ PeerAgent is a production-ready multi-agent AI system that intelligently routes 
 | 📚 **ContentAgent** | Research with citations | "What is machine learning?", "Latest AI trends" |
 | 📈 **BusinessSenseAgent** | Socratic problem diagnosis | "Sales are dropping 20%", "Diagnose churn" |
 | 🌳 **ProblemAgent** | MECE problem tree | Converts diagnosis to structured analysis |
+
+---
+
+## 🎬 Live Demos
+
+### 📈 Business Demo - Socratic Questioning Flow
+
+Watch the AI diagnose business problems through 3 phases of intelligent questioning:
+
+![Business Demo - Socratic Q&A Flow](docs/demos/business_demo.webp)
+
+**Features shown:**
+- Phase 1: Problem Identification (when, what, impact)
+- Phase 2: Scope & Urgency (who, consequences, attempts)
+- Phase 3: Root Cause Discovery (needs, data, success criteria)
+- Output 1: Business Diagnosis with urgency assessment
+- Output 2: MECE Problem Tree structure
+
+---
+
+### 🌳 Problem Tree - MECE Analysis
+
+Generate structured problem trees directly from any business problem:
+
+![Problem Tree Demo](docs/demos/problem_tree_demo.webp)
+
+**Features shown:**
+- Problem type classification (Growth/Cost/Operational/etc.)
+- Main problem statement
+- 3-5 root causes with 2-3 sub-causes each
+- MECE (Mutually Exclusive, Collectively Exhaustive) structure
+
+---
+
+### 💻 Code Agent - Multi-Language Generation
+
+Generate production-ready code in any programming language:
+
+![Code Agent Demo](docs/demos/code_agent_demo.webp)
+
+**Features shown:**
+- Python code generation with best practices
+- Regex pattern for email validation
+- Code explanations included
+
+---
+
+### 📚 Content Agent - Research & Citations
+
+Get well-researched answers with source citations:
+
+![Content Agent Demo](docs/demos/content_agent_demo.webp)
+
+**Features shown:**
+- Comprehensive REST vs GraphQL comparison
+- Key differences highlighted
+- Source citations included
 
 ---
 

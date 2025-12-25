@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # BusinessSenseAgent - Socratic questioning with LangGraph StateGraph
-from typing import Any, Dict, List, Literal, Optional, Annotated
+from typing import Any, Dict, List, Literal, Optional, Annotated, TYPE_CHECKING
 import operator
 import json
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
@@ -10,8 +10,12 @@ from langgraph.graph import StateGraph, START, END
 from typing_extensions import TypedDict
 
 from src.agents.base import BaseAgent
-from src.models.agents import BusinessDiagnosis, BusinessAgentQuestions
+from src.models.agents import BusinessDiagnosis, BusinessAgentQuestions, FullBusinessAnalysis
 from src.utils.logger import log_agent_call, get_logger
+
+# Avoid circular import
+if TYPE_CHECKING:
+    from src.agents.problem_agent import ProblemStructuringAgent
 
 
 class BusinessAgentState(TypedDict):
@@ -300,6 +304,56 @@ Output ONLY this JSON structure:
             urgency_level="Critical"  # Mark as critical so user knows to take action
         )
 
+    async def _generate_problem_tree(
+            self,
+            diagnosis: BusinessDiagnosis,
+            collected_answers: Dict[str, str]
+    ):
+        """
+        Generate Problem Tree structure using ProblemStructuringAgent.
+
+        This is OUTPUT 2 per the PDF requirements:
+        - Problem Type Classification
+        - Structured Problem Tree (MECE)
+        """
+        from src.agents.problem_agent import ProblemStructuringAgent
+        from src.models.agents import ProblemTree, ProblemCause
+
+        try:
+            # Build additional context from collected answers
+            additional_context = "\n".join([
+                f"Q: {q}\nA: {a}" for q, a in collected_answers.items()
+            ])
+
+            # Use ProblemStructuringAgent to create the tree
+            problem_agent = ProblemStructuringAgent(session_id=self.session_id)
+            problem_tree = await problem_agent.execute(
+                diagnosis=diagnosis,
+                additional_context=additional_context,
+                session_id=self.session_id
+            )
+
+            self.logger.info(
+                f"Problem Tree generated: {problem_tree.problem_type} with {len(problem_tree.root_causes)} causes")
+            return problem_tree
+
+        except Exception as e:
+            self.logger.error(f"Problem tree generation failed: {e}")
+            # Return a fallback tree
+            return ProblemTree(
+                problem_type="Operational",
+                main_problem=diagnosis.identified_business_problem,
+                root_causes=[
+                    ProblemCause(
+                        cause="Analysis requires further investigation",
+                        sub_causes=[
+                            "Root cause analysis pending",
+                            "Additional data may be needed"
+                        ]
+                    )
+                ]
+            )
+
     async def _validate_answers(
             self,
             task: str,
@@ -538,13 +592,21 @@ Be strict but helpful. If the answer is irrelevant, can_proceed should be false.
 
         self.logger.info(f"Phase: {phase_config['emoji']} {current_phase} (round {answer_rounds + 1})")
 
-        # If complete, generate diagnosis
+        # If complete, generate diagnosis AND problem tree
         if current_phase == "complete":
             self.logger.info("Generating final diagnosis...")
             diagnosis = await self._generate_diagnosis(task, collected_answers)
+
+            # Now automatically generate the Problem Tree (Output 2 per PDF requirements)
+            self.logger.info("Generating problem structure (Output 2)...")
+            problem_tree = await self._generate_problem_tree(diagnosis, collected_answers)
+
             return {
-                "type": "diagnosis",
-                "data": diagnosis
+                "type": "full_analysis",
+                "data": FullBusinessAnalysis(
+                    diagnosis=diagnosis,
+                    problem_tree=problem_tree
+                )
             }
 
         # Generate questions for current phase
@@ -646,6 +708,10 @@ Be strict but helpful. If the answer is irrelevant, can_proceed should be false.
         self.logger.info("Generating demo diagnosis...")
         diagnosis = await self._generate_diagnosis(task, collected_answers)
 
+        # Generate problem tree (Output 2)
+        self.logger.info("Generating demo problem tree...")
+        problem_tree = await self._generate_problem_tree(diagnosis, collected_answers)
+
         return {
             "type": "demo",
             "task": task,
@@ -655,6 +721,14 @@ Be strict but helpful. If the answer is irrelevant, can_proceed should be false.
                 "identified_business_problem": diagnosis.identified_business_problem,
                 "hidden_root_risk": diagnosis.hidden_root_risk,
                 "urgency_level": diagnosis.urgency_level
+            },
+            "problem_tree": {
+                "problem_type": problem_tree.problem_type,
+                "main_problem": problem_tree.main_problem,
+                "root_causes": [
+                    {"cause": c.cause, "sub_causes": c.sub_causes}
+                    for c in problem_tree.root_causes
+                ]
             }
         }
 

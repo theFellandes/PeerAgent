@@ -658,6 +658,66 @@ async def business_demo(
         )
 
 
+@router.post(
+    "/business/problem-tree",
+    summary="Problem Tree Demo",
+    description="""
+Generate a Problem Tree (Issue Tree) directly from a business problem description.
+
+This endpoint demonstrates **Output 2** from the PDF requirements:
+- Problem Type Classification (Growth, Cost, Operational, Technology, Regulation, Organizational)
+- Structured Problem Tree with 3-5 root causes
+- Each root cause has 2-3 sub-causes
+- Follows MECE (Mutually Exclusive, Collectively Exhaustive) principles
+
+**Rate Limit:** 5 requests per minute
+    """
+)
+@limiter.limit("5/minute")
+async def problem_tree_demo(
+    request: Request,
+    body: TaskExecuteRequest,
+    peer_agent: PeerAgent = Depends(get_peer_agent)
+) -> Dict[str, Any]:
+    """
+    Generate a Problem Tree directly from a problem description.
+    
+    This is a quick way to demonstrate the Problem Structuring Agent
+    without going through the full Socratic questioning flow.
+    """
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Problem description cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    try:
+        # Use ProblemStructuringAgent's structure_from_text method
+        problem_agent = peer_agent.problem_agent
+        problem_tree = await problem_agent.structure_from_text(
+            problem_description=body.task,
+            session_id=body.session_id
+        )
+        
+        return {
+            "task_id": f"tree-{uuid.uuid4().hex[:8]}",
+            "status": "completed",
+            "agent_type": "problem_structuring_agent",
+            "result": {
+                "type": "problem_tree",
+                "problem_description": body.task,
+                "problem_tree": problem_tree.model_dump()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Problem tree generation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": f"Problem tree generation failed: {str(e)}", "code": "TREE_ERROR"}
+        )
+
+
 # ==============================================================================
 # Utility Endpoints
 # ==============================================================================
