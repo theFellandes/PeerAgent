@@ -485,14 +485,307 @@ PHASE_CONFIG = {
 
 ---
 
+## Automated Demo Flow
+
+The Business Agent supports an **automated demo mode** where the LLM generates both questions AND realistic answers, simulating a complete diagnostic conversation without user input.
+
+### Purpose
+
+- **Demonstrations**: Show stakeholders how the Socratic flow works
+- **Testing**: Validate the diagnostic pipeline end-to-end
+- **Training**: Generate example conversations for documentation
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     DEMO EXECUTION FLOW                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  POST /v1/agent/business/demo                                   │
+│         │                                                        │
+│         ▼                                                        │
+│  ┌──────────────────────────────────────────────────────┐       │
+│  │              execute_demo(task)                       │       │
+│  │                                                       │       │
+│  │   FOR each phase [identify, clarify, diagnose]:      │       │
+│  │     │                                                 │       │
+│  │     ├─► _generate_questions() ──► LLM Call 1        │       │
+│  │     │        (Returns 2-3 questions)                 │       │
+│  │     │                                                 │       │
+│  │     └─► _generate_demo_answer() ──► LLM Call 2      │       │
+│  │              (Returns realistic user answer)         │       │
+│  │                                                       │       │
+│  │   THEN:                                               │       │
+│  │     └─► _generate_diagnosis() ──► LLM Call 3        │       │
+│  │              (Returns final diagnosis)               │       │
+│  └──────────────────────────────────────────────────────┘       │
+│         │                                                        │
+│         ▼                                                        │
+│  Return complete conversation with all phases + diagnosis       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Demo Answer Generation Prompt
+
+The `_generate_demo_answer` method uses this prompt to simulate realistic user responses:
+
+```python
+prompt = f"""You are simulating a business professional answering diagnostic questions about their problem.
+
+## The Original Business Problem
+{task}
+
+## Current Phase: {phase.upper()}
+
+## Questions Being Asked
+{questions_formatted}
+
+{previous_context}  # Previous Q&A for context
+
+## Your Task
+Generate a realistic, detailed answer that a business professional would give to these questions.
+The answer should:
+1. Be specific with numbers, percentages, timeframes where appropriate
+2. Sound authentic and natural (not generic)
+3. Reveal information useful for diagnosis
+4. Be 2-4 sentences long, addressing all questions together
+5. Include specific business context and realistic details
+
+Respond with ONLY the answer text, no quotes or prefixes."""
+```
+
+### API Endpoint
+
+#### POST /v1/agent/business/demo
+
+**Request Body:**
+```json
+{
+    "task": "Sales team is underperforming despite increased marketing budget",
+    "session_id": "demo-session-123"
+}
+```
+
+**Response:**
+```json
+{
+    "task_id": "demo-abc123",
+    "status": "completed",
+    "agent_type": "business_sense_agent",
+    "demo_mode": true,
+    "result": {
+        "type": "demo",
+        "task": "Sales team is underperforming despite increased marketing budget",
+        "rounds": [
+            {
+                "phase": "identify",
+                "phase_emoji": "🔍",
+                "questions": [
+                    "When did you first notice the sales team underperformance?",
+                    "What is the measurable gap between expected and actual performance?",
+                    "Is this currently a top priority for leadership?"
+                ],
+                "answer": "We noticed the gap about 6 weeks ago. Despite increasing marketing spend by 40% to $2M/quarter, sales only grew 5% instead of the expected 25%. The CEO made this the top agenda item at our last board meeting."
+            },
+            {
+                "phase": "clarify",
+                "phase_emoji": "🎯",
+                "questions": ["..."],
+                "answer": "..."
+            },
+            {
+                "phase": "diagnose",
+                "phase_emoji": "🔬",
+                "questions": ["..."],
+                "answer": "..."
+            }
+        ],
+        "diagnosis": {
+            "customer_stated_problem": "Sales team is underperforming despite increased marketing budget",
+            "identified_business_problem": "Disconnect between marketing-generated leads and sales team capacity/skills. Marketing is generating volume but not quality leads that match the sales team's expertise.",
+            "hidden_root_risk": "Burning marketing budget on leads that don't convert erodes confidence in marketing effectiveness and creates tension between departments.",
+            "urgency_level": "Critical"
+        }
+    }
+}
+```
+
+### Key Implementation Methods
+
+```python
+class BusinessSenseAgent:
+    
+    async def execute_demo(self, task: str) -> Dict[str, Any]:
+        """
+        Execute a complete demo of the Socratic questioning flow.
+        
+        The LLM generates both questions AND realistic answers, 
+        simulating an entire conversation through all 3 phases to diagnosis.
+        """
+        phases = ["identify", "clarify", "diagnose"]
+        rounds = []
+        collected_answers = {}
+        
+        for phase in phases:
+            # Generate questions
+            questions = await self._generate_questions(task, phase, collected_answers)
+            
+            # Generate simulated answer
+            answer = await self._generate_demo_answer(task, questions, phase, collected_answers)
+            
+            rounds.append({
+                "phase": phase,
+                "questions": questions,
+                "answer": answer
+            })
+            
+            # Store for context
+            for q in questions:
+                collected_answers[q] = answer
+        
+        # Generate final diagnosis
+        diagnosis = await self._generate_diagnosis(task, collected_answers)
+        
+        return {"type": "demo", "rounds": rounds, "diagnosis": diagnosis}
+    
+    async def _generate_demo_answer(self, task, questions, phase, previous) -> str:
+        """Generate a realistic user answer for demo purposes."""
+        # Uses LLM to simulate business professional response
+        pass
+```
+
+### UI Integration
+
+The UI calls the demo API when the user clicks the **📈 Demo** button:
+
+```python
+def render_business_demo(task: str) -> Optional[dict]:
+    """Call API to run full automated demo."""
+    
+    with st.spinner("🎬 Generating demo... (LLM is creating questions and answers)"):
+        response = requests.post(
+            f"{API_URL}/v1/agent/business/demo",
+            json={"task": task},
+            timeout=180  # Demo takes longer - 6 LLM calls
+        )
+    
+    # Render each phase with questions and simulated answers
+    for round_data in result["rounds"]:
+        st.markdown(f"### {round_data['phase_emoji']} {phase_title}")
+        st.markdown("**Agent asks:**")
+        for q in round_data["questions"]:
+            st.markdown(f"  - *{q}*")
+        st.success(f"💬 \"{round_data['answer']}\"")
+    
+    # Render diagnosis
+    st.markdown("### 📊 Business Diagnosis Complete")
+```
+
+---
+
+## Technical Implementation
+
+### Files Involved
+
+| File | Purpose |
+|------|---------|
+| `src/agents/business_agent.py` | Core agent with Socratic logic + demo methods |
+| `src/models/agents.py` | Data models (BusinessAgentQuestions, BusinessDiagnosis) |
+| `src/models/requests.py` | API request models |
+| `src/api/routes/agent.py` | API endpoints including `/business/demo` |
+| `ui/streamlit_app.py` | User interface with demo rendering |
+
+### Key Methods
+
+```python
+class BusinessSenseAgent:
+    # Interactive Flow
+    async def execute(task, collected_answers, answer_rounds, ...) -> Dict
+        """Main entry point - routes to questions or diagnosis"""
+    
+    async def _validate_answers(task, questions, user_answer, phase) -> Dict
+        """LLM call to validate answer quality"""
+    
+    async def _generate_questions(task, phase, collected_answers) -> Dict
+        """LLM call to generate phase-appropriate questions"""
+    
+    async def _generate_diagnosis(task, collected_answers) -> BusinessDiagnosis
+        """LLM call to generate final diagnosis"""
+    
+    def _determine_next_phase(answer_rounds, max_rounds) -> str
+        """Determine which phase based on completed rounds"""
+    
+    # Demo Flow (NEW)
+    async def execute_demo(task) -> Dict
+        """Run complete automated demo with LLM-generated Q&A"""
+    
+    async def _generate_demo_answer(task, questions, phase, previous) -> str
+        """Generate realistic simulated user answers"""
+```
+
+### Session State (UI)
+
+```python
+st.session_state.business_questions      # Current pending questions
+st.session_state.business_original_task  # Initial problem statement
+st.session_state.business_collected_answers  # All Q&A pairs
+st.session_state.business_answer_round   # Current round number
+```
+
+---
+
+## Configuration
+
+### PHASE_CONFIG
+
+```python
+PHASE_CONFIG = {
+    "identify": {
+        "emoji": "🔍",
+        "title": "Problem Identification",
+        "description": "Understanding when, what, and why"
+    },
+    "clarify": {
+        "emoji": "🎯", 
+        "title": "Scope & Urgency",
+        "description": "Understanding who, consequences, and attempts"
+    },
+    "diagnose": {
+        "emoji": "🔬",
+        "title": "Root Cause Discovery", 
+        "description": "Understanding needs, data, and success criteria"
+    },
+    "complete": {
+        "emoji": "📊",
+        "title": "Diagnosis Complete",
+        "description": "Generating final analysis"
+    }
+}
+```
+
+---
+
+## LLM Call Summary
+
+| Method | Purpose | Input | Output |
+|--------|---------|-------|--------|
+| `_generate_questions` | Create phase-specific questions | task, phase, context | 2-3 questions |
+| `_validate_answers` | Check answer relevance | questions, answer | valid/feedback |
+| `_generate_diagnosis` | Final analysis | all Q&A pairs | diagnosis object |
+| `_generate_demo_answer` | Simulate user response | questions, context | realistic answer |
+
+---
+
 ## Future Enhancements
 
 1. **Smart Skip to Diagnosis** - If user provides enough info early, skip remaining phases
 2. **Follow-up Questions** - Allow "why are you asking this?" explanations
 3. **Confidence Scoring** - Track confidence in diagnosis based on answer quality
 4. **History Context** - Use previous session context for returning users
+5. **Cost Tracking** - Add estimated_cost_usd for each conversation
 
 ---
 
-*Document generated: December 2024*
-*Version: 1.0*
+*Document updated: December 2024*
+*Version: 2.0 - Added Automated Demo Flow*

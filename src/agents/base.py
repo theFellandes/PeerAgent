@@ -17,6 +17,22 @@ DEFAULT_MODELS = {
     "anthropic": "claude-3-sonnet-20240229"
 }
 
+# Pricing per 1M tokens (input, output) in USD
+MODEL_PRICING = {
+    # OpenAI
+    "gpt-4o-mini": (0.15, 0.60),      # $0.15 input, $0.60 output per 1M
+    "gpt-4o": (2.50, 10.00),           # $2.50 input, $10.00 output per 1M
+    "gpt-4-turbo": (10.00, 30.00),
+    "gpt-3.5-turbo": (0.50, 1.50),
+    # Google
+    "gemini-1.5-flash": (0.075, 0.30),  # Very cheap
+    "gemini-1.5-pro": (1.25, 5.00),
+    # Anthropic
+    "claude-3-sonnet-20240229": (3.00, 15.00),
+    "claude-3-haiku-20240307": (0.25, 1.25),
+    "claude-3-opus-20240229": (15.00, 75.00),
+}
+
 
 class BaseAgent(ABC):
     """Abstract base class for all agents in the PeerAgent system."""
@@ -254,3 +270,66 @@ class BaseAgent(ABC):
         
         messages.append(HumanMessage(content=user_message))
         return messages
+    
+    def estimate_cost(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Estimate the cost of an LLM call based on token counts.
+        
+        Args:
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+            model: Model name (uses current model if not specified)
+            
+        Returns:
+            Dict with input_cost, output_cost, total_cost, and token counts
+        """
+        model_name = model or self.model_name
+        
+        # Get pricing or use default
+        input_price, output_price = MODEL_PRICING.get(model_name, (0.15, 0.60))
+        
+        # Calculate cost (pricing is per 1M tokens)
+        input_cost = (input_tokens / 1_000_000) * input_price
+        output_cost = (output_tokens / 1_000_000) * output_price
+        total_cost = input_cost + output_cost
+        
+        return {
+            "model": model_name,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "input_cost_usd": round(input_cost, 6),
+            "output_cost_usd": round(output_cost, 6),
+            "estimated_cost_usd": round(total_cost, 6)
+        }
+    
+    async def invoke_llm_with_cost(
+        self,
+        messages: list[BaseMessage],
+        **kwargs
+    ) -> Tuple[BaseMessage, Dict[str, Any]]:
+        """Invoke the LLM and return response with cost tracking.
+        
+        Returns:
+            Tuple of (response, cost_info)
+        """
+        # Estimate input tokens (rough: 4 chars = 1 token)
+        input_text = "".join(m.content for m in messages if hasattr(m, 'content'))
+        estimated_input_tokens = len(input_text) // 4
+        
+        response = await self.invoke_llm(messages, **kwargs)
+        
+        # Estimate output tokens
+        estimated_output_tokens = len(response.content) // 4
+        
+        cost_info = self.estimate_cost(estimated_input_tokens, estimated_output_tokens)
+        
+        self.logger.info(
+            f"LLM call: {cost_info['input_tokens']}→{cost_info['output_tokens']} tokens | "
+            f"${cost_info['estimated_cost_usd']:.6f}"
+        )
+        
+        return response, cost_info

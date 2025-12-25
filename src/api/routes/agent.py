@@ -51,7 +51,6 @@ def map_status(store_status: StoreStatus) -> TaskStatus:
 
 @router.post(
     "/execute",
-    response_model=TaskResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Bad Request - Empty task"},
         429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"},
@@ -81,7 +80,7 @@ async def execute_task(
     body: TaskExecuteRequest,
     background_tasks: BackgroundTasks,
     peer_agent: PeerAgent = Depends(get_peer_agent)
-) -> TaskResponse:
+) -> Dict[str, Any]:
     """
     Execute a task via the PeerAgent system.
     
@@ -129,21 +128,36 @@ async def execute_task(
             task_id=task_id
         )
         
+        # Auto-assign priority based on agent type if not provided
+        # Business problems get highest priority (3), code medium (2), content low (1)
+        priority_map = {
+            "business_sense_agent": 3,
+            "code_agent": 2,
+            "content_agent": 1,
+            "peer_agent": 2  # Default to medium
+        }
+        agent_type = result.get("agent_type", "peer_agent")
+        priority = body.priority or priority_map.get(agent_type, 2)
+        
+        logger.info(f"Task {task_id} completed | agent={agent_type} | priority={priority}")
+        
         # Update task with result
         task_store.update(task_id, {
             "status": StoreStatus.COMPLETED,
             "result": result,
             "completed_at": datetime.utcnow().isoformat(),
-            "agent_type": result.get("agent_type")
+            "agent_type": agent_type,
+            "priority": priority
         })
         
-        logger.info(f"Task {task_id} completed successfully")
-        
-        return TaskResponse(
-            task_id=task_id,
-            status=TaskStatus.COMPLETED,
-            message="Task executed successfully"
-        )
+        # Return result directly (no polling needed)
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "agent_type": agent_type,
+            "priority": priority,
+            "result": result
+        }
         
     except Exception as e:
         logger.error(f"Task {task_id} failed: {e}")
@@ -162,6 +176,89 @@ async def execute_task(
             status_code=500,
             detail={"error": str(e), "code": "EXECUTION_ERROR"}
         )
+
+
+@router.post(
+    "/execute/stream",
+    summary="Execute with Streaming Response",
+    description="""
+Execute a task with Server-Sent Events (SSE) streaming.
+
+The response is streamed as SSE events, with each chunk containing a portion 
+of the LLM response. Use this for long-running tasks where you want to show
+progressive output to the user.
+
+**Event Types:**
+- `data: {"content": "..."}` - A chunk of the response
+- `data: {"done": true}` - Stream completed
+- `data: {"error": "..."}` - An error occurred
+
+**Rate Limit:** 5 requests per minute
+    """
+)
+@limiter.limit("5/minute")
+async def execute_task_stream(
+    request: Request,
+    body: TaskExecuteRequest,
+    peer_agent: PeerAgent = Depends(get_peer_agent)
+):
+    """Execute a task with streaming SSE response."""
+    from src.api.streaming import create_sse_response, stream_llm_response
+    
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    task_id = f"task-stream-{uuid.uuid4().hex[:8]}"
+    session_id = body.session_id or f"session-{uuid.uuid4().hex[:8]}"
+    
+    logger.info(f"Starting streamed task {task_id}: {body.task[:50]}...")
+    
+    async def generate_stream():
+        """Generate streaming response."""
+        import json
+        
+        # Classify the task first
+        classification = await peer_agent.classify_task(body.task)
+        yield f"data: {json.dumps({'event': 'classification', 'agent': classification})}\n\n"
+        
+        # Get the appropriate agent
+        if classification == "code":
+            agent = peer_agent.code_agent
+        elif classification == "content":
+            agent = peer_agent.content_agent
+        elif classification == "business":
+            agent = peer_agent.business_agent
+        else:
+            agent = peer_agent
+        
+        # Stream the LLM response
+        messages = agent.create_messages(body.task)
+        
+        full_response = ""
+        async for chunk in agent.llm.astream(messages):
+            if hasattr(chunk, 'content') and chunk.content:
+                full_response += chunk.content
+                yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+        
+        # Send completion with metadata
+        priority_map = {"business_sense_agent": 3, "code_agent": 2, "content_agent": 1}
+        priority = body.priority or priority_map.get(agent.agent_type, 2)
+        
+        yield f"data: {json.dumps({'done': True, 'agent_type': agent.agent_type, 'priority': priority, 'task_id': task_id})}\n\n"
+    
+    from starlette.responses import StreamingResponse
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @router.post(
@@ -343,7 +440,6 @@ async def delete_task(task_id: str) -> dict:
 
 @router.post(
     "/execute/direct/{agent_type}",
-    response_model=TaskResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid agent type"},
         429: {"model": ErrorResponse, "description": "Rate Limit Exceeded"}
@@ -367,9 +463,9 @@ async def execute_direct(
     agent_type: str,
     body: TaskExecuteRequest,
     peer_agent: PeerAgent = Depends(get_peer_agent)
-) -> TaskResponse:
+) -> Dict[str, Any]:
     """Execute a task with a specific agent type."""
-    valid_types = ["code", "content", "business", "problem"]
+    valid_types = ["code", "content", "business", "problem", "summary", "translate", "email", "data", "competitor"]
     
     if agent_type not in valid_types:
         raise HTTPException(
@@ -418,11 +514,13 @@ async def execute_direct(
             "agent_type": result.get("agent_type")
         })
         
-        return TaskResponse(
-            task_id=task_id,
-            status=TaskStatus.COMPLETED,
-            message=f"Task executed with {agent_type} agent"
-        )
+        # Return result directly (no polling needed)
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "agent_type": result.get("agent_type"),
+            "result": result
+        }
         
     except Exception as e:
         logger.error(f"Direct execution failed: {e}")
@@ -515,6 +613,109 @@ async def continue_business_analysis(
     except Exception as e:
         logger.error(f"Business continuation failed: {e}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post(
+    "/business/demo",
+    summary="Business Demo",
+    description="Run a complete demo of the business Socratic questioning flow. The LLM generates both questions AND answers automatically."
+)
+@limiter.limit("5/minute")
+async def business_demo(
+    request: Request,
+    body: TaskExecuteRequest,
+    peer_agent: PeerAgent = Depends(get_peer_agent)
+) -> Dict[str, Any]:
+    """
+    Run a complete business diagnosis demo.
+    
+    The LLM generates questions for each phase and then generates
+    realistic answers to those questions, simulating a full conversation.
+    """
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    try:
+        business_agent = peer_agent.business_agent
+        result = await business_agent.execute_demo(task=body.task)
+        
+        return {
+            "task_id": f"demo-{uuid.uuid4().hex[:8]}",
+            "status": "completed",
+            "agent_type": "business_sense_agent",
+            "demo_mode": True,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Demo execution failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": f"Demo failed: {str(e)}", "code": "DEMO_ERROR"}
+        )
+
+
+@router.post(
+    "/business/problem-tree",
+    summary="Problem Tree Demo",
+    description="""
+Generate a Problem Tree (Issue Tree) directly from a business problem description.
+
+This endpoint demonstrates **Output 2** from the PDF requirements:
+- Problem Type Classification (Growth, Cost, Operational, Technology, Regulation, Organizational)
+- Structured Problem Tree with 3-5 root causes
+- Each root cause has 2-3 sub-causes
+- Follows MECE (Mutually Exclusive, Collectively Exhaustive) principles
+
+**Rate Limit:** 5 requests per minute
+    """
+)
+@limiter.limit("5/minute")
+async def problem_tree_demo(
+    request: Request,
+    body: TaskExecuteRequest,
+    peer_agent: PeerAgent = Depends(get_peer_agent)
+) -> Dict[str, Any]:
+    """
+    Generate a Problem Tree directly from a problem description.
+    
+    This is a quick way to demonstrate the Problem Structuring Agent
+    without going through the full Socratic questioning flow.
+    """
+    if not body.task or not body.task.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Problem description cannot be empty", "code": "EMPTY_TASK"}
+        )
+    
+    try:
+        # Use ProblemStructuringAgent's structure_from_text method
+        problem_agent = peer_agent.problem_agent
+        problem_tree = await problem_agent.structure_from_text(
+            problem_description=body.task,
+            session_id=body.session_id
+        )
+        
+        return {
+            "task_id": f"tree-{uuid.uuid4().hex[:8]}",
+            "status": "completed",
+            "agent_type": "problem_structuring_agent",
+            "result": {
+                "type": "problem_tree",
+                "problem_description": body.task,
+                "problem_tree": problem_tree.model_dump()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Problem tree generation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={"error": f"Problem tree generation failed: {str(e)}", "code": "TREE_ERROR"}
+        )
 
 
 # ==============================================================================

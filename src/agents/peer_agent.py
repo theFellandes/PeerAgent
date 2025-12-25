@@ -12,6 +12,11 @@ from src.agents.code_agent import CodeAgent
 from src.agents.content_agent import ContentAgent
 from src.agents.business_agent import BusinessSenseAgent
 from src.agents.problem_agent import ProblemStructuringAgent
+from src.agents.summary_agent import SummaryAgent
+from src.agents.translation_agent import TranslationAgent
+from src.agents.email_agent import EmailAgent
+from src.agents.data_agent import DataAnalysisAgent
+from src.agents.competitor_agent import CompetitorAgent
 from src.models.responses import AgentType
 from src.utils.logger import log_agent_call, get_logger
 from src.utils.memory import get_memory_store
@@ -38,7 +43,7 @@ AGENT_KEYWORDS = {
     ],
     "content": [
         "search", "find", "research", "what is", "explain", "how does",
-        "information about", "tell me about", "describe", "summarize",
+        "information about", "tell me about", "describe",
         "news about", "latest", "current", "article", "content about"
     ],
     "business": [
@@ -48,6 +53,26 @@ AGENT_KEYWORDS = {
         "efficiency", "process", "workflow", "team", "management",
         "budget", "investment", "roi", "kpi", "metric", "performance",
         "diagnosis", "analyze my", "understand why", "root cause"
+    ],
+    "summary": [
+        "summarize", "summary", "tldr", "condense", "brief", "shorten",
+        "key points", "main points", "overview of"
+    ],
+    "translate": [
+        "translate", "translation", "in english", "in spanish", "in french",
+        "in german", "in turkish", "to english", "to turkish"
+    ],
+    "email": [
+        "email", "draft email", "write email", "compose email",
+        "professional email", "business email", "reply email"
+    ],
+    "data": [
+        "data analysis", "analyze data", "csv", "excel", "spreadsheet",
+        "statistics", "dataset", "data insights", "trends in data"
+    ],
+    "competitor": [
+        "competitor", "competition", "market analysis", "swot",
+        "competitive analysis", "rival", "industry analysis"
     ]
 }
 
@@ -73,6 +98,11 @@ class PeerAgent(BaseAgent):
         self._content_agent = None
         self._business_agent = None
         self._problem_agent = None
+        self._summary_agent = None
+        self._translation_agent = None
+        self._email_agent = None
+        self._data_agent = None
+        self._competitor_agent = None
         self._graph = None
     
     @property
@@ -81,18 +111,33 @@ class PeerAgent(BaseAgent):
     
     @property
     def system_prompt(self) -> str:
-        return """You are an intelligent task router. Your job is to classify incoming tasks into one of three categories:
+        return """You are an intelligent task router. Your job is to classify incoming tasks into one of these categories:
 
 1. CODE: Tasks that require writing, debugging, or explaining code
    Examples: "Write a Python function", "Debug this script", "Create an API endpoint"
 
 2. CONTENT: Tasks that require research, information gathering, or content creation
-   Examples: "What is machine learning?", "Find information about X", "Summarize this topic"
+   Examples: "What is machine learning?", "Find information about X"
 
 3. BUSINESS: Tasks that involve business problem diagnosis, analysis, or consulting
-   Examples: "Our sales are dropping", "Help me understand this operational issue", "Diagnose our customer churn"
+   Examples: "Our sales are dropping", "Help me understand this operational issue"
 
-Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
+4. SUMMARY: Tasks that require summarizing text or documents
+   Examples: "Summarize this article", "Give me the key points"
+
+5. TRANSLATE: Tasks that require translating text between languages
+   Examples: "Translate this to Spanish", "Convert to English"
+
+6. EMAIL: Tasks that require drafting professional emails
+   Examples: "Write an email to my client", "Draft a follow-up email"
+
+7. DATA: Tasks that require analyzing data or statistics
+   Examples: "Analyze this CSV data", "What trends do you see in this data"
+
+8. COMPETITOR: Tasks that require analyzing competitors or markets
+   Examples: "Analyze our competitors", "Market analysis for X"
+
+Respond with ONLY one word: CODE, CONTENT, BUSINESS, SUMMARY, TRANSLATE, EMAIL, DATA, or COMPETITOR"""
     
     # Lazy-load sub-agents
     @property
@@ -119,6 +164,36 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             self._problem_agent = ProblemStructuringAgent(self.session_id)
         return self._problem_agent
     
+    @property
+    def summary_agent(self) -> SummaryAgent:
+        if self._summary_agent is None:
+            self._summary_agent = SummaryAgent(self.session_id)
+        return self._summary_agent
+    
+    @property
+    def translation_agent(self) -> TranslationAgent:
+        if self._translation_agent is None:
+            self._translation_agent = TranslationAgent(self.session_id)
+        return self._translation_agent
+    
+    @property
+    def email_agent(self) -> EmailAgent:
+        if self._email_agent is None:
+            self._email_agent = EmailAgent(self.session_id)
+        return self._email_agent
+    
+    @property
+    def data_agent(self) -> DataAnalysisAgent:
+        if self._data_agent is None:
+            self._data_agent = DataAnalysisAgent(self.session_id)
+        return self._data_agent
+    
+    @property
+    def competitor_agent(self) -> CompetitorAgent:
+        if self._competitor_agent is None:
+            self._competitor_agent = CompetitorAgent(self.session_id)
+        return self._competitor_agent
+    
     def _keyword_classify(self, task: str) -> Optional[str]:
         """
         Quick keyword-based classification.
@@ -126,7 +201,11 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
         """
         task_lower = task.lower()
         
-        scores = {"code": 0, "content": 0, "business": 0}
+        scores = {
+            "code": 0, "content": 0, "business": 0,
+            "summary": 0, "translate": 0, "email": 0,
+            "data": 0, "competitor": 0
+        }
         
         for agent_type, keywords in AGENT_KEYWORDS.items():
             for keyword in keywords:
@@ -139,6 +218,12 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             winners = [k for k, v in scores.items() if v == max_score]
             if len(winners) == 1:
                 return winners[0]
+        
+        # For single-keyword matches, check specific cases
+        if max_score == 1:
+            for agent_type in ["summary", "translate", "email", "data", "competitor"]:
+                if scores[agent_type] == 1:
+                    return agent_type
         
         return None  # Ambiguous, use LLM
     
@@ -153,13 +238,23 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
             response = await self.llm.ainvoke(prompt.format_messages(task=task))
             content = response.content.strip().upper()
             
-            # Extract classification from response
-            if "CODE" in content:
+            # Extract classification from response (check specific types first)
+            if "SUMMARY" in content:
+                return "summary"
+            elif "TRANSLATE" in content:
+                return "translate"
+            elif "EMAIL" in content:
+                return "email"
+            elif "DATA" in content:
+                return "data"
+            elif "COMPETITOR" in content:
+                return "competitor"
+            elif "CODE" in content:
                 return "code"
-            elif "CONTENT" in content:
-                return "content"
             elif "BUSINESS" in content:
                 return "business"
+            elif "CONTENT" in content:
+                return "content"
             else:
                 # Default to content for general queries
                 return "content"
@@ -428,6 +523,41 @@ Respond with ONLY one word: CODE, CONTENT, or BUSINESS"""
                     "type": result.get("type"),
                     "data": data_dict
                 }
+            elif agent_type == "summary":
+                result = await self.summary_agent.execute(
+                    task, session_id=session_id, task_id=task_id
+                )
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result)[:500])
+                return {"agent_type": "summary_agent", "data": result}
+            elif agent_type == "translate":
+                result = await self.translation_agent.execute(
+                    task, session_id=session_id, task_id=task_id
+                )
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result)[:500])
+                return {"agent_type": "translation_agent", "data": result}
+            elif agent_type == "email":
+                result = await self.email_agent.execute(
+                    task, session_id=session_id, task_id=task_id
+                )
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result)[:500])
+                return {"agent_type": "email_agent", "data": result}
+            elif agent_type == "data":
+                result = await self.data_agent.execute(
+                    task, session_id=session_id, task_id=task_id
+                )
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result)[:500])
+                return {"agent_type": "data_analysis_agent", "data": result}
+            elif agent_type == "competitor":
+                result = await self.competitor_agent.execute(
+                    task, session_id=session_id, task_id=task_id
+                )
+                if session_id:
+                    memory.add_interaction(session_id, task, str(result)[:500])
+                return {"agent_type": "competitor_agent", "data": result}
             else:
                 raise ValueError(f"Unknown agent type: {agent_type}")
         except Exception as e:

@@ -15,6 +15,7 @@
 
 - [What's New in v2.0](#-whats-new-in-v20)
 - [Overview](#-overview)
+- [Live Demos](#-live-demos)
 - [Architecture](#-architecture)
 - [Quick Start](#-quick-start)
 - [Agents](#-agents)
@@ -23,6 +24,8 @@
 - [Configuration](#-configuration)
 - [Testing](#-testing)
 - [Deployment](#-deployment)
+- [Design Decisions](#-design-decisions)
+- [Production Readiness](#-production-readiness)
 - [Contributing](#-contributing)
 
 ---
@@ -72,12 +75,81 @@
 
 PeerAgent is a production-ready multi-agent AI system that intelligently routes user requests to specialized agents:
 
+### Core Agents
+
 | Agent | Purpose | Example Tasks |
 |-------|---------|---------------|
 | 💻 **CodeAgent** | Code generation in any language | "Write a Python function", "Create SQL query" |
 | 📚 **ContentAgent** | Research with citations | "What is machine learning?", "Latest AI trends" |
 | 📈 **BusinessSenseAgent** | Socratic problem diagnosis | "Sales are dropping 20%", "Diagnose churn" |
 | 🌳 **ProblemAgent** | MECE problem tree | Converts diagnosis to structured analysis |
+
+### Additional Agents
+
+| Agent | Purpose | Example Tasks |
+|-------|---------|---------------|
+| 📝 **SummaryAgent** | Text summarization | "Summarize this article", "Give me key points" |
+| 🌐 **TranslationAgent** | Multi-language translation | "Translate to Spanish", "Convert to English" |
+| ✉️ **EmailAgent** | Professional email drafting | "Write a follow-up email", "Draft client response" |
+| 📊 **DataAnalysisAgent** | Data/CSV analysis | "Analyze this data", "Find trends in CSV" |
+| 🔍 **CompetitorAgent** | Competitor research | "Analyze our competitors", "Market SWOT analysis" |
+
+---
+
+## 🎬 Live Demos
+
+### 📈 Business Demo - Socratic Questioning Flow
+
+Watch the AI diagnose business problems through 3 phases of intelligent questioning:
+
+![Business Demo - Socratic Q&A Flow](docs/demos/business_demo.webp)
+
+**Features shown:**
+- Phase 1: Problem Identification (when, what, impact)
+- Phase 2: Scope & Urgency (who, consequences, attempts)
+- Phase 3: Root Cause Discovery (needs, data, success criteria)
+- Output 1: Business Diagnosis with urgency assessment
+- Output 2: MECE Problem Tree structure
+
+---
+
+### 🌳 Problem Tree - MECE Analysis
+
+Generate structured problem trees directly from any business problem:
+
+![Problem Tree Demo](docs/demos/problem_tree_demo.webp)
+
+**Features shown:**
+- Problem type classification (Growth/Cost/Operational/etc.)
+- Main problem statement
+- 3-5 root causes with 2-3 sub-causes each
+- MECE (Mutually Exclusive, Collectively Exhaustive) structure
+
+---
+
+### 💻 Code Agent - Multi-Language Generation
+
+Generate production-ready code in any programming language:
+
+![Code Agent Demo](docs/demos/code_agent_demo.webp)
+
+**Features shown:**
+- Python code generation with best practices
+- Regex pattern for email validation
+- Code explanations included
+
+---
+
+### 📚 Content Agent - Research & Citations
+
+Get well-researched answers with source citations:
+
+![Content Agent Demo](docs/demos/content_agent_demo.webp)
+
+**Features shown:**
+- Comprehensive REST vs GraphQL comparison
+- Key differences highlighted
+- Source citations included
 
 ---
 
@@ -301,6 +373,89 @@ curl -X POST http://localhost:8000/v1/agent/business/continue \
         "hidden_root_risk": "Brand perception degradation",
         "urgency_level": "Critical"
     }
+```
+
+### SummaryAgent
+
+**Text summarization** with TL;DR, key points, and details.
+
+```bash
+curl -X POST http://localhost:8000/v1/agent/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Summarize: [your long text here]"}'
+
+# Response
+{
+    "tldr": "One-sentence summary",
+    "key_points": ["Point 1", "Point 2", "Point 3"],
+    "details": "Additional important information"
+}
+```
+
+### TranslationAgent
+
+**Multi-language translation** with automatic language detection.
+
+```bash
+curl -X POST http://localhost:8000/v1/agent/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Translate to Spanish: Hello, how are you?"}'
+
+# Response
+{
+    "source_language": "English",
+    "target_language": "Spanish",
+    "translated_text": "Hola, ¿cómo estás?"
+}
+```
+
+### EmailAgent
+
+**Professional email drafting** with proper structure and tone.
+
+```bash
+curl -X POST http://localhost:8000/v1/agent/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Write a follow-up email to a client about project delays"}'
+
+# Response
+{
+    "subject": "Project Update - Timeline Adjustment",
+    "body": "Full email content...",
+    "tone": "professional"
+}
+```
+
+### DataAnalysisAgent
+
+**Data analysis** with insights, patterns, and recommendations.
+
+```bash
+curl -X POST http://localhost:8000/v1/agent/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Analyze this sales data: Q1: $100k, Q2: $85k, Q3: $92k, Q4: $78k"}'
+
+# Response
+{
+    "insights": ["22% decline from Q1 to Q4", "Q2 drop most significant"],
+    "recommendations": ["Investigate Q2 factors", "Review seasonal trends"]
+}
+```
+
+### CompetitorAgent
+
+**Competitor analysis** with SWOT and strategic recommendations.
+
+```bash
+curl -X POST http://localhost:8000/v1/agent/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Analyze competitors in the CRM software market"}'
+
+# Response
+{
+    "competitors": [{"name": "Salesforce", "strengths": [...], "weaknesses": [...]}],
+    "opportunities": ["AI integration gap", "SMB market underserved"],
+    "recommendations": ["Focus on vertical specialization"]
 }
 ```
 
@@ -400,6 +555,31 @@ ws.onopen = () => {
 OpenAI (primary) → Google Gemini → Anthropic Claude
 ```
 
+### LLM Response Caching
+
+To save API tokens, similar LLM queries are cached in Redis:
+
+```python
+# Automatic caching with decorator
+from src.utils.llm_cache import cached_llm_call
+
+@cached_llm_call("business_questions")
+async def generate_questions(self, task: str) -> str:
+    # LLM call - results are cached for 24 hours
+    ...
+```
+
+**Benefits:**
+- 💰 Reduces API costs by caching repeated queries
+- ⚡ Faster responses for cached questions
+- 🔄 Graceful fallback if Redis unavailable
+
+**Cache Configuration:**
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Cache TTL | 24 hours | How long responses are cached |
+| Key Format | `llm_cache:{hash}` | Redis key pattern |
+
 ---
 
 ## 🧪 Testing
@@ -427,6 +607,35 @@ pytest tests/ -v --cov=src --cov-report=html
 | `src/agents/` | 90%+ |
 | `src/api/` | 85%+ |
 | `src/utils/` | 80%+ |
+
+### Improving Test Coverage
+
+To increase test coverage, consider:
+
+1. **Edge Case Tests**
+   - Empty task inputs
+   - Special characters in user messages
+   - Very long task descriptions
+   - Concurrent request handling
+
+2. **Mock LLM Responses**
+   ```python
+   @patch('src.agents.base.ChatOpenAI')
+   def test_with_mock_llm(mock_llm):
+       mock_llm.return_value.ainvoke.return_value = MockResponse()
+   ```
+
+3. **Load Testing**
+   ```bash
+   # Using locust for load testing
+   pip install locust
+   locust -f tests/load/locustfile.py --host=http://localhost:8000
+   ```
+
+4. **Agent Flow Integration Tests**
+   - Full Socratic questioning flow (3 phases)
+   - Code generation with validation
+   - Content search with source verification
 
 ---
 
@@ -472,6 +681,50 @@ docker-compose --profile monitoring up -d
 | **Queue** | Celery + Redis | Low latency, simple |
 | **WebSocket** | FastAPI native | Integrated with routing |
 | **LLM** | Multi-provider | Resilience through fallback |
+
+---
+
+## 🚀 Production Readiness
+
+### Current Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Core API | ✅ Ready | All endpoints functional |
+| Rate Limiting | ✅ Ready | 10 req/min per IP |
+| Queue System | ✅ Ready | Celery + Redis |
+| Docker Deployment | ✅ Ready | docker-compose included |
+| CI/CD Pipeline | ✅ Ready | GitHub Actions |
+| Session Memory | ✅ Ready | LangGraph state management |
+| Logging | ✅ Ready | MongoDB + structured logs |
+
+### Production Improvements Needed
+
+| Priority | Improvement | Description |
+|----------|-------------|-------------|
+| **High** | Authentication | Add API key or JWT-based auth |
+| **High** | Secrets Management | Use AWS Secrets Manager or HashiCorp Vault |
+| **Medium** | Monitoring | Integrate Prometheus + Grafana dashboards |
+| **Medium** | Caching | Add Redis caching for repeated LLM queries |
+| **Low** | Horizontal Scaling | Kubernetes deployment manifests |
+| **Low** | Load Balancing | nginx/traefik configuration |
+
+### Security Hardening
+
+```bash
+# Recommended security headers (add to nginx/traefik)
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+Content-Security-Policy: default-src 'self'
+```
+
+### Scalability Recommendations
+
+1. **Separate LLM Calls**: Move expensive LLM operations to dedicated worker pool
+2. **Response Caching**: Cache similar queries with semantic similarity
+3. **Database Sharding**: Shard MongoDB by session_id for high-volume deployments
+4. **CDN for Static**: Use CloudFront/Cloudflare for UI assets
 
 ---
 
